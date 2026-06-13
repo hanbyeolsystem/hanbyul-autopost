@@ -1,0 +1,1147 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>한별시스템 · AI 멀티채널 자동발행 콘솔</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2230; --line:#2a3242;
+    --ink:#e6edf3; --sub:#9aa7b6; --accent:#3b82f6; --accent2:#22c55e;
+    --warn:#f59e0b; --danger:#ef4444; --chip:#222b3a;
+    --naver:#03c75a; --google:#ea4335; --threads:#8b5cf6; --youtube:#ff0033;
+    --insta:#e1306c; --facebook:#1877f2;
+    --radius:14px; --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:'Pretendard',-apple-system,BlinkMacSystemFont,'Malgun Gothic',sans-serif;
+    line-height:1.55;}
+  header{padding:20px 26px;border-bottom:1px solid var(--line);
+    display:flex;align-items:center;gap:14px;background:linear-gradient(180deg,#11161f,#0d1117);}
+  .logo{width:40px;height:40px;border-radius:10px;
+    background:linear-gradient(135deg,var(--accent),#06b6d4);
+    display:grid;place-items:center;font-weight:800;font-size:18px;}
+  header h1{font-size:17px;margin:0;font-weight:700}
+  header .tag{font-size:12px;color:var(--sub)}
+  .wrap{display:grid;grid-template-columns:380px 1fr;gap:0;min-height:calc(100vh - 73px)}
+  .left{border-right:1px solid var(--line);padding:22px;overflow:auto}
+  .right{padding:22px;overflow:auto}
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--sub);margin:0 0 12px}
+  label{display:block;font-size:13px;color:var(--sub);margin:14px 0 6px}
+  textarea,input,select{width:100%;background:var(--panel);border:1px solid var(--line);
+    color:var(--ink);border-radius:10px;padding:11px 12px;font-size:14px;font-family:inherit}
+  textarea{min-height:96px;resize:vertical}
+  .drop{border:1.5px dashed var(--line);border-radius:12px;padding:18px;text-align:center;
+    color:var(--sub);font-size:13px;cursor:pointer;background:var(--panel)}
+  .drop:hover{border-color:var(--accent);color:var(--ink)}
+  .thumbs{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+  .thumbs .t{width:58px;height:58px;border-radius:8px;object-fit:cover;border:1px solid var(--line)}
+  .thumbs .file{font-size:11px;background:var(--chip);padding:6px 9px;border-radius:8px;color:var(--sub)}
+  .row{display:flex;gap:10px}
+  .row>*{flex:1}
+  .channels{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+  .ch{display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line);
+    padding:9px 11px;border-radius:10px;cursor:pointer;font-size:13px;user-select:none}
+  .ch input{width:auto}
+  .dot{width:10px;height:10px;border-radius:50%}
+  .btn{width:100%;margin-top:18px;background:var(--accent);color:#fff;border:none;
+    padding:13px;border-radius:11px;font-size:15px;font-weight:700;cursor:pointer}
+  .btn:hover{filter:brightness(1.08)}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .btn.ghost{background:var(--panel2);color:var(--ink);border:1px solid var(--line)}
+  .hint{font-size:12px;color:var(--sub);margin-top:8px}
+  .cards{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:1100px){.cards{grid-template-columns:1fr}.wrap{grid-template-columns:1fr}
+    .left{border-right:none;border-bottom:1px solid var(--line)}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;
+    display:flex;flex-direction:column}
+  .card .head{display:flex;align-items:center;gap:9px;padding:12px 14px;border-bottom:1px solid var(--line);
+    font-weight:700;font-size:14px}
+  .card .head .meta{margin-left:auto;font-size:11px;color:var(--sub);font-weight:500}
+  .card .body{padding:14px}
+  .card textarea{min-height:160px;background:var(--panel2)}
+  .card .foot{display:flex;gap:8px;padding:10px 14px;border-top:1px solid var(--line)}
+  .mini{font-size:12px;padding:8px 12px;border-radius:9px;border:1px solid var(--line);
+    background:var(--panel2);color:var(--ink);cursor:pointer}
+  .mini.pub{background:var(--accent2);border-color:var(--accent2);color:#04210f;font-weight:700}
+  .mini:hover{filter:brightness(1.1)}
+  .badge{font-size:10px;padding:3px 8px;border-radius:20px;background:var(--chip);color:var(--sub)}
+  .badge.ok{background:#0f2c1b;color:#5ee08a}
+  .badge.wait{background:#2c230f;color:#f5c469}
+  .empty{color:var(--sub);text-align:center;padding:60px 20px;font-size:14px;
+    border:1.5px dashed var(--line);border-radius:14px}
+  .queue{margin-top:26px}
+  .qitem{display:flex;align-items:center;gap:10px;padding:11px 13px;background:var(--panel);
+    border:1px solid var(--line);border-radius:10px;margin-bottom:8px;font-size:13px}
+  .qitem .when{margin-left:auto;color:var(--sub);font-size:12px}
+  .typing{font-size:13px;color:var(--accent);margin-top:10px;display:none;font-weight:600}
+  .spinner{width:18px;height:18px;border:2.5px solid var(--line);border-top-color:var(--accent);
+    border-radius:50%;display:inline-block;animation:spin .8s linear infinite;flex:0 0 auto}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .schedule{display:flex;gap:6px;align-items:center;padding:0 14px 12px;flex-wrap:wrap}
+  .schedule input[type=datetime-local]{flex:1;min-width:150px;font-size:12px;padding:7px 9px}
+  .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;
+    justify-content:center;z-index:100;padding:20px}
+  .modal{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    max-width:560px;width:100%;max-height:85vh;display:flex;flex-direction:column;overflow:hidden}
+  .modal-head{display:flex;align-items:center;padding:14px 18px;border-bottom:1px solid var(--line);
+    font-weight:700;font-size:15px}
+  .modal-x{margin-left:auto;cursor:pointer;color:var(--sub);font-size:18px}
+  .modal-body{padding:18px;overflow:auto;white-space:pre-wrap;font-size:14px;line-height:1.7}
+  .preview-paper{background:#fff;color:#1a1a1a;border-radius:10px;padding:20px;
+    white-space:pre-wrap;font-size:14px;line-height:1.7}
+  .tabbar{display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap}
+  .tabbar .tb{font-size:12px;padding:7px 12px;border-radius:20px;background:var(--panel);
+    border:1px solid var(--line);color:var(--sub);cursor:pointer}
+  .tabbar .tb.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .note{background:#10233a;border:1px solid #1e3a5f;color:#9cc4ef;padding:10px 12px;
+    border-radius:10px;font-size:12px;margin-top:14px}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">한별</div>
+  <div>
+    <h1>AI 멀티채널 자동발행 콘솔 <span class="badge">DEMO</span></h1>
+    <div class="tag">사진·영상·기본문구 → AI 채널별 맞춤 글 생성 → 검토 → 발행 대기열 · 한별시스템</div>
+  </div>
+  <div style="margin-left:auto;text-align:right;font-size:12px;color:var(--sub)">
+    <div>이번 생성 비용: <b id="costNow" style="color:var(--accent2)">$0.0000</b></div>
+    <div>누적 사용: <b id="costTotal" style="color:var(--ink)">$0.0000</b> <span style="cursor:pointer;text-decoration:underline" id="costReset">초기화</span></div>
+  </div>
+</header>
+
+<div class="wrap">
+  <section class="left">
+    <h2>1. 소재 입력</h2>
+
+    <label>미디어 (사진/영상)</label>
+    <div class="drop" id="drop">📷 클릭하거나 파일을 끌어다 놓으세요<br><span style="font-size:11px">jpg · png · mp4 등</span></div>
+    <input type="file" id="file" multiple accept="image/*,video/*" style="display:none" />
+    <div class="thumbs" id="thumbs"></div>
+    <button class="mini" id="analyzeBtn" style="margin-top:8px;display:none">🔍 사진 분석 (글과 일치 검증)</button>
+    <div id="imgDesc" style="display:none;font-size:12px;background:#0e1b14;border:1px solid #1d3a2a;
+      color:#a9e0c0;border-radius:8px;padding:9px 11px;margin-top:8px;white-space:pre-wrap"></div>
+
+    <label>고객이 겪던 어려움 / 증상 ★ <span style="color:var(--accent);cursor:pointer" id="painPick">＋ 자주쓰는 증상</span></label>
+    <textarea id="pain" placeholder="예) 공사 현장 임시 사무실이라 비싼 복합기를 새로 사기도 부담되고, 짧게만 쓸 건데 어떻게 해야 할지 막막해하셨습니다."></textarea>
+
+    <label>해결 방법 <span style="color:var(--accent);cursor:pointer" id="solPick">＋ 자주쓰는 해결</span></label>
+    <textarea id="solution" style="min-height:60px" placeholder="예) 단기 렌탈로 알맞은 모델을 골라 네트워크 출력까지 세팅."></textarea>
+
+    <label>한 일 / 핵심 메시지 *</label>
+    <textarea id="seed" placeholder="예) 단기 렌탈로 교세라 복합기를 설치하고 네트워크 출력까지 세팅해, 비용 부담 없이 바로 쓰실 수 있게 해드렸습니다."></textarea>
+
+    <div class="row">
+      <div>
+        <label>지역</label>
+        <input id="region" placeholder="대구, 경북" value="대구" />
+      </div>
+      <div>
+        <label>톤</label>
+        <select id="tone">
+          <option>전문가 · 신뢰</option>
+          <option>친근 · 대화체</option>
+          <option>강력 · 세일즈</option>
+          <option>정보 · 교육형</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="row">
+      <div>
+        <label>서비스 분류 <span style="color:var(--accent);cursor:pointer" id="svcPick">＋관리</span></label>
+        <select id="service"></select>
+      </div>
+      <div>
+        <label>모델/장비 <span style="color:var(--accent);cursor:pointer" id="modelPick">＋관리</span></label>
+        <select id="model"></select>
+      </div>
+    </div>
+
+    <div class="row">
+      <div>
+        <label>핵심 키워드 <span style="font-size:11px;color:var(--sub)">(비우면 AI 자동)</span></label>
+        <input id="kw" placeholder="비워두면 AI가 글 분석해 자동 생성" />
+      </div>
+      <div>
+        <label>글 유형 (블로그 공식)</label>
+        <select id="posttype">
+          <option value="review">후기형</option>
+          <option value="guide">가이드형</option>
+          <option value="case">사례형</option>
+        </select>
+      </div>
+    </div>
+
+    <label>발행 채널</label>
+    <div class="channels" id="channels"></div>
+
+    <h2 style="margin-top:22px">2. 생성</h2>
+    <button class="btn" id="gen">⚡ AI 채널별 글 자동 생성</button>
+    <div class="typing" id="typing">AI가 채널별 맞춤 글을 작성 중…</div>
+    <div class="note" id="enginenote">기본값은 한별 Supabase Edge Function입니다. 비우면 무료 공식으로 폴백, 다른 백엔드 쓰려면 주소만 바꾸세요.</div>
+    <label style="margin-top:10px">AI 백엔드 주소 (Supabase Edge Function · 자동 저장)</label>
+    <input id="apiBase" value="https://jrzesjgyrvgvwazfajec.supabase.co/functions/v1/hanbyul-autopost-ai" placeholder="예) https://...supabase.co/functions/v1/hanbyul-autopost-ai" />
+  </section>
+
+  <section class="right">
+    <div class="tabbar">
+      <div class="tb on" data-view="draft">📝 생성 결과</div>
+      <div class="tb" data-view="queue">📤 발행 대기열 <span id="qcount" class="badge">0</span></div>
+      <div class="tb" data-view="boards">🗂 채널 게시판</div>
+      <div class="tb" data-view="stats">📊 성과 분석</div>
+    </div>
+
+    <div id="view-draft">
+      <div id="bulkbar" style="display:none;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:center">
+        <button class="mini pub" id="bulkPublish">⚡ 전체 바로발행</button>
+        <button class="mini" id="bulkSchedule">🗓 전체 예약발행</button>
+        <button class="mini" id="bulkMove">📥 전체 게시판으로 이동·저장</button>
+        <span style="font-size:12px;color:var(--sub)">생성된 6채널을 한 번에 처리</span>
+      </div>
+      <div class="empty" id="empty">왼쪽에서 소재를 입력하고 <b>AI 채널별 글 자동 생성</b>을 누르면<br>여기에 채널별 초안이 나타납니다.</div>
+      <div class="cards" id="cards"></div>
+    </div>
+
+    <div id="view-queue" style="display:none">
+      <h2>발행 대기열</h2>
+      <div id="queue"></div>
+      <div class="empty" id="qempty">아직 대기열에 추가된 글이 없습니다.</div>
+    </div>
+
+    <div id="view-boards" style="display:none">
+      <h2>채널 게시판 — 발행물 보관함</h2>
+      <div id="boardTabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px"></div>
+      <div id="boardContent"></div>
+    </div>
+
+    <div id="view-stats" style="display:none">
+      <h2>성과 분석 — 노출수 · 클릭수</h2>
+      <div style="font-size:12px;color:var(--sub);margin-bottom:12px">채널명을 클릭하면 그 게시판으로 이동합니다. 숫자를 클릭하면 직접 입력/수정할 수 있어요.</div>
+      <div id="statsArea"></div>
+    </div>
+  </section>
+</div>
+
+<!-- 미리보기 / 예약 모달 -->
+<div id="modal" class="modal-bg" style="display:none">
+  <div class="modal">
+    <div class="modal-head">
+      <span id="modalTitle">미리보기</span>
+      <span class="modal-x" id="modalClose">✕</span>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+</div>
+
+<script>
+const CHANNELS = [
+  {id:'naver',    name:'네이버 블로그', color:'var(--naver)',    limit:2000, mode:'반자동(예약)'},
+  {id:'google',   name:'구글 블로그',   color:'var(--google)',   limit:2000, mode:'API 자동'},
+  {id:'threads',  name:'쓰레드',        color:'var(--threads)',  limit:500,  mode:'반자동(예약)'},
+  {id:'youtube',  name:'유튜브',        color:'var(--youtube)',  limit:1000, mode:'API 자동(설명/제목)'},
+  {id:'instagram',name:'인스타그램',    color:'var(--insta)',    limit:2200, mode:'API 자동'},
+  {id:'facebook', name:'페이스북',      color:'var(--facebook)', limit:2000, mode:'API 자동'},
+];
+
+let media = [];
+let drafts = {};
+let queue = [];
+let imageDescText = '';   // 사진 분석 결과 (생성 시 백엔드로 전달)
+
+// ── 선택용 데이터 저장소 (증상/해결/서비스/모델) — localStorage CRUD ──
+const DEFAULTS = {
+  pains: [
+    '비싼 장비를 새로 사기엔 부담되고, 짧게만 쓸 건데 막막하다',
+    '복합기가 자주 멈추고 AS가 느려 업무가 끊긴다',
+    '사무실 데이터를 어디에 안전하게 보관할지 모르겠다',
+    '직원이 늘면서 출력·공유 환경이 뒤죽박죽이다',
+  ],
+  solutions: [
+    '사용 기간·업무량을 함께 따져 알맞은 모델을 렌탈로 제안',
+    '당일 출장 점검으로 장비를 정상화하고 정기 관리로 전환',
+    '시놀로지 NAS로 데이터 백업·공유 환경을 구축',
+    '네트워크·출력·공유를 한 번에 정리해 통합 세팅',
+  ],
+  services: ['복합기/복사기 렌탈','프린터 렌탈/판매','컴퓨터 구축/유지보수','시놀로지 NAS 구축','데이터 백업/보안','사무기기 통합관리'],
+  models: ['교세라 TASKalfa','캐논 GX7192','HP OfficeJet','신도리코 복합기','시놀로지 DS224+','시놀로지 DS925+','기타/미정'],
+};
+function loadList(key){
+  try{ const v=JSON.parse(localStorage.getItem('hanbyul_'+key)); if(Array.isArray(v)) return v; }catch(e){}
+  return DEFAULTS[key].slice();
+}
+function saveList(key, arr){ try{ localStorage.setItem('hanbyul_'+key, JSON.stringify(arr)); }catch(e){} }
+let LISTS = { pains:loadList('pains'), solutions:loadList('solutions'), services:loadList('services'), models:loadList('models') };
+
+// 서비스/모델 select 채우기
+function fillSelect(id, arr){
+  const el=document.getElementById(id); const cur=el.value;
+  el.innerHTML = arr.map(v=>`<option>${v.replace(/</g,'&lt;')}</option>`).join('');
+  if(cur && arr.includes(cur)) el.value=cur;
+}
+fillSelect('service', LISTS.services);
+fillSelect('model', LISTS.models);
+
+const chWrap = document.getElementById('channels');
+CHANNELS.forEach(c=>{
+  const el = document.createElement('label');
+  el.className='ch';
+  el.innerHTML = `<input type="checkbox" value="${c.id}" checked>
+    <span class="dot" style="background:${c.color}"></span>${c.name}`;
+  chWrap.appendChild(el);
+});
+
+// ── AI 백엔드 주소 자동 기억 (한 번만 입력하면 다음부터 자동) ──
+const apiBaseEl = document.getElementById('apiBase');
+try{
+  let saved = localStorage.getItem('hanbyul_apiBase');
+  // 옛 NAS·localhost 기본값은 무시 (Supabase Edge Function로 마이그레이션)
+  if(saved && /(^https?:\/\/(localhost|127\.|192\.168\.|10\.|172\.))/.test(saved)){ saved = ''; localStorage.removeItem('hanbyul_apiBase'); }
+  if(saved) apiBaseEl.value = saved;
+}catch(e){}
+apiBaseEl.addEventListener('change', ()=>{
+  try{ localStorage.setItem('hanbyul_apiBase', apiBaseEl.value.trim()); }catch(e){}
+});
+apiBaseEl.addEventListener('blur', ()=>{
+  try{ localStorage.setItem('hanbyul_apiBase', apiBaseEl.value.trim()); }catch(e){}
+});
+
+// ── Supabase Edge Function 호출 헬퍼 ──
+// 백엔드 URL이 *.supabase.co 면 Authorization Bearer / apikey 헤더를 자동 부착.
+// (anon 키는 공개 키 — RLS와 verify_jwt 가 실제 게이트.)
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpyemVzamd5cnZndndhemZhamVjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc3MjgwMTksImV4cCI6MjA5MzMwNDAxOX0.6FAb0CUMuYVqsvWmUR8Bbvmph4MJjlQqSDi_Mkza1c0';
+function aiFetch(base, path, init){
+  const url = base.replace(/\/$/,'') + path;
+  const headers = Object.assign({'Content-Type':'application/json'}, (init && init.headers) || {});
+  if(/\.supabase\.co\//.test(url)){
+    headers['Authorization'] = 'Bearer ' + SUPABASE_ANON_KEY;
+    headers['apikey'] = SUPABASE_ANON_KEY;
+  }
+  return fetch(url, Object.assign({}, init || {}, { headers }));
+}
+
+const drop = document.getElementById('drop');
+const fileInput = document.getElementById('file');
+const thumbs = document.getElementById('thumbs');
+drop.onclick = ()=>fileInput.click();
+drop.ondragover = e=>{e.preventDefault();drop.style.borderColor='var(--accent)'};
+drop.ondragleave = ()=>drop.style.borderColor='';
+drop.ondrop = e=>{e.preventDefault();drop.style.borderColor='';handleFiles(e.dataTransfer.files)};
+fileInput.onchange = e=>handleFiles(e.target.files);
+let mediaImageURLs = [];   // 업로드한 사진 미리보기용 URL
+let cardImages = {};       // 채널별 AI 생성 이미지 URL (미리보기에 사용)
+let cardVideos = {};       // 채널별 AI 생성 영상 URL (게시판/미리보기에 사용)
+function handleFiles(files){
+  [...files].forEach(f=>{
+    media.push(f);
+    if(f.type.startsWith('image/')){
+      const url=URL.createObjectURL(f);
+      mediaImageURLs.push(url);
+      const img=document.createElement('img');img.className='t';
+      img.src=url;thumbs.appendChild(img);
+    }else{
+      const d=document.createElement('div');d.className='file';
+      d.textContent='🎬 '+f.name.slice(0,14);thumbs.appendChild(d);
+    }
+  });
+  // 이미지가 하나라도 있으면 '사진 분석' 버튼 노출
+  if(media.some(m=>m.type.startsWith('image/'))) document.getElementById('analyzeBtn').style.display='inline-block';
+}
+
+// 파일 → base64 (이미지만)
+function fileToB64(file){
+  return new Promise((res,rej)=>{
+    const r=new FileReader();
+    r.onload=()=>{ const s=r.result; res(s.substring(s.indexOf(',')+1)); };
+    r.onerror=rej; r.readAsDataURL(file);
+  });
+}
+
+// ── 사진 분석 (Claude Vision) ──
+document.getElementById('analyzeBtn').onclick = async ()=>{
+  const apiBase = document.getElementById('apiBase').value.trim();
+  if(!apiBase){ alert('사진 분석은 AI 백엔드가 필요합니다. 백엔드 주소를 확인하고 서버를 켜주세요.'); return; }
+  const imgs = media.filter(m=>m.type.startsWith('image/')).slice(0,4);
+  if(!imgs.length){ alert('분석할 사진이 없습니다.'); return; }
+  const box=document.getElementById('imgDesc');
+  box.style.display='block'; box.textContent='🔍 사진 분석 중…';
+  try{
+    const images = await Promise.all(imgs.map(async f=>({ media_type:f.type, data:await fileToB64(f) })));
+    const r = await aiFetch(apiBase, '/analyze-image', {
+      method:'POST', body:JSON.stringify({images})
+    });
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const d = await r.json();
+    if(!d.ok) throw new Error(d.error||'분석 실패');
+    imageDescText = d.desc||'';
+    box.textContent = '📷 사진 분석 결과 (글에 반영됨):\n\n'+imageDescText;
+    if(d.usage&&d.usage.usd){ addCost(d.usage.usd); }
+  }catch(e){
+    box.textContent='⚠ 사진 분석 실패: '+e.message+'\n(백엔드 서버가 켜져 있는지, Claude 키가 있는지 확인)';
+  }
+};
+
+// ── 선택 목록 팝업 (증상/해결) ──
+function openPick(key, targetId, title){
+  const arr = LISTS[key];
+  document.getElementById('modalTitle').textContent = title;
+  document.getElementById('modalBody').innerHTML =
+    `<div style="font-size:12px;color:var(--sub);margin-bottom:10px">항목을 누르면 입력칸에 채워집니다.</div>`+
+    arr.map((v,i)=>`<div class="pickrow" data-i="${i}" style="padding:10px 12px;border:1px solid var(--line);
+      border-radius:9px;margin-bottom:7px;cursor:pointer">${v.replace(/</g,'&lt;')}</div>`).join('')+
+    `<div style="margin-top:12px;text-align:right"><span class="mini" id="pickManage">＋ 추가/수정/삭제</span></div>`;
+  document.getElementById('modal').style.display='flex';
+  document.querySelectorAll('.pickrow').forEach(row=>{
+    row.onclick=()=>{ document.getElementById(targetId).value = arr[+row.dataset.i];
+      document.getElementById('modal').style.display='none'; };
+  });
+  document.getElementById('pickManage').onclick=()=> openManage(key, title);
+}
+
+// ── 목록 관리 (추가/수정/삭제) — 증상/해결/서비스/모델 공통 ──
+function openManage(key, title){
+  const isSelect = (key==='services'||key==='models');
+  const render = ()=>{
+    const arr=LISTS[key];
+    document.getElementById('modalTitle').textContent = title+' 관리';
+    document.getElementById('modalBody').innerHTML =
+      arr.map((v,i)=>`<div style="display:flex;gap:6px;margin-bottom:7px">
+        <input class="mItem" data-i="${i}" value="${v.replace(/"/g,'&quot;')}" style="flex:1"/>
+        <span class="mini" data-del="${i}" style="cursor:pointer">🗑</span></div>`).join('')+
+      `<div style="display:flex;gap:6px;margin-top:10px">
+        <input id="mNew" placeholder="새 항목 추가" style="flex:1"/>
+        <button class="mini pub" id="mAdd">＋추가</button></div>
+       <div style="margin-top:12px;text-align:right"><button class="btn" id="mSave" style="margin:0;width:auto;padding:9px 18px">저장</button></div>`;
+    document.querySelectorAll('[data-del]').forEach(b=> b.onclick=()=>{ arr.splice(+b.dataset.del,1); render(); });
+    document.getElementById('mAdd').onclick=()=>{ const v=document.getElementById('mNew').value.trim(); if(v){ arr.push(v); render(); } };
+    document.getElementById('mSave').onclick=()=>{
+      document.querySelectorAll('.mItem').forEach(inp=>{ arr[+inp.dataset.i]=inp.value.trim(); });
+      LISTS[key]=arr.filter(Boolean); saveList(key, LISTS[key]);
+      if(key==='services') fillSelect('service', LISTS.services);
+      if(key==='models') fillSelect('model', LISTS.models);
+      document.getElementById('modal').style.display='none';
+    };
+  };
+  render();
+  document.getElementById('modal').style.display='flex';
+}
+
+document.getElementById('painPick').onclick=()=> openPick('pains','pain','자주 쓰는 증상 선택');
+document.getElementById('solPick').onclick=()=> openPick('solutions','solution','자주 쓰는 해결방법 선택');
+document.getElementById('svcPick').onclick=()=> openManage('services','서비스 분류');
+document.getElementById('modelPick').onclick=()=> openManage('models','모델/장비');
+
+const FOOTER = '비슷한 고민이 있으시면 편하게 물어보세요. 꼭 저희에게 맡기지 않으셔도, 어떤 방법이 맞는지부터 같이 찾아드리겠습니다.\n\n한별시스템 · 대구·경북 기업 전산 도우미\n컴퓨터 · 복사기 · 프린터 · NAS · 사무기기 설치/관리\n☎ 053-588-7119 (전화 한 통이면 상담은 무료입니다)';
+const ADDR = '대구 달서구 문화회관11안길 22-7 1층';
+
+function naverTitle(region, model, kws, painLine){
+  const lead = (kws[0]||'복사기렌탈');
+  let promise;
+  if(painLine){
+    let p = painLine.replace(/[.…]+$/,'').trim();
+    if(p.length>22){ p = p.slice(0,22).replace(/[\s,]+$/,'') + '… 고민'; }
+    promise = p;
+  } else { promise = `${model||'사무기기'} 고민`; }
+  return `${region}${lead} — ${promise}, 이렇게 해결했어요`;
+}
+function naverHashtags(region, kws){
+  const base = [];
+  kws.forEach(k=>{ base.push('#'+region+k.replace(/\s/g,'')); base.push('#'+k.replace(/\s/g,'')); });
+  base.push('#한별시스템','#'+region+'IT','#'+region+'사무기기렌탈');
+  return [...new Set(base)].join(' ');
+}
+
+function naverBody(type, d){
+  const {region,model,kws,core,pain,painLine,painIntro,toneOpen}=d;
+  const lead=kws[0]||'복사기렌탈';
+  const HEAD='안녕하세요, 한별시스템입니다.';
+  const TAIL=[FOOTER,'',naverHashtags(region,kws)];
+
+  if(type==='guide'){
+    return [
+      `${region} ${lead} 어떻게 고를까 — 후회 없이 선택하는 기준 5가지`,
+      '', HEAD, '',
+      pain? `${pain}\n\n막상 알아보면 모델도 많고 조건도 제각각이라 더 헷갈리시죠. 그래서 선택 기준부터 정리해 드립니다.`
+          : `${region}에서 ${lead}을(를) 처음 알아보시면, 모델도 많고 조건도 제각각이라 헷갈리기 쉽습니다. 후회 없이 고르는 기준을 정리해 드립니다.`,
+      '',
+      '[📷 사진 1 — 비교 자료 / 모델 라인업]','',
+      `■ 1) 용도부터 정하세요\n출력량이 많은지, 단기인지 장기인지에 따라 답이 완전히 달라집니다. ${core}`,
+      '',
+      `■ 2) 구매 vs 렌탈, 솔직 비교\n초기 비용·유지비·고장 대응을 함께 따져야 합니다. 짧게 쓰실 거면 렌탈이, 오래 쓰실 거면 구매가 유리한 경우가 많습니다.`,
+      '',
+      `■ 3) AS 속도가 진짜 중요합니다\n장비는 결국 멈춥니다. ${region}·경북은 저희가 당일 대응이 가능한 지역입니다.`,
+      '',
+      '[📷 사진 2 — 설치/관리 현장]','',
+      `■ 4) 숨은 비용 체크\n계약 기간, 매수 초과 요금, 소모품 포함 여부를 꼭 확인하세요.`,
+      '',
+      `■ 5) 한 곳에서 통합 관리되는지\n컴퓨터·프린터·NAS를 업체별로 따로 부르면 피곤합니다. 한 번에 봐드릴 수 있는 곳이 편합니다.`,
+      '',
+      `정리하면, 정답은 '가장 비싼 것'이 아니라 '이 사무실에 맞는 것'입니다. 어떤 게 맞을지 모르시겠다면, 파는 입장이 아니라 같이 고르는 입장에서 도와드리겠습니다.`,
+      '', ...TAIL
+    ].join('\n');
+  }
+
+  if(type==='case'){
+    return [
+      `${region} ${model||lead} 구축 사례 — ${painLine||'중소기업 사무실'}, 이렇게 해결했습니다`,
+      '', HEAD, '',
+      pain? `이번에 도와드린 곳은 ${pain}\n\n비슷한 규모의 사업장이라면 충분히 공감하실 상황입니다.`
+          : `이번에 도와드린 곳은 ${region}의 한 사무실이었습니다. 데이터와 장비를 어떻게 정리할지 고민이 많으셨습니다.`,
+      '',
+      '[📷 사진 1 — 현장 점검 / 사전 상담]','',
+      `[요청사항] 고객사가 원한 것은 화려한 장비가 아니라 '멈추지 않고, 신경 안 써도 되는' 환경이었습니다.`,
+      '',
+      `[제안 구성] ${toneOpen} ${core} 과하지 않게, 딱 필요한 만큼으로 구성했습니다.`,
+      '',
+      '[📷 사진 2 — 설치 / 구축 완료]','',
+      `[도입 효과] 설치 후 "이제 이 부분은 신경 안 써도 되겠다"는 말씀을 들었습니다. 저희에게 가장 중요한 평가는 매출이 아니라 그 한마디입니다.`,
+      '',
+      `비슷한 고민을 하고 계신 ${region}·경북의 사업장이라면, 꼭 저희에게 맡기지 않으셔도 어떤 구성이 맞는지부터 같이 봐드리겠습니다.`,
+      '', ...TAIL
+    ].join('\n');
+  }
+
+  return [
+    naverTitle(region, model, kws, painLine),
+    '', HEAD, '',
+    painIntro, '',
+    '[📷 사진 1 — 상담/점검 현장]', '',
+    `${toneOpen} ${core}`, '',
+    `저희가 가장 먼저 본 것은 '무엇을 파느냐'가 아니라 '${region}의 이 사무실에 정말 필요한 게 무엇인가'였습니다. 그래서 비용·사용 기간·업무량을 함께 따져보고, 새로 사는 것보다 ${model||'알맞은 장비'}가 더 맞겠다는 결론을 같이 내렸습니다.`, '',
+    '[📷 사진 2 — 설치 완료 / 정상 작동 확인]', '',
+    `설치 후 네트워크와 출력까지 직접 확인해 바로 업무에 쓰실 수 있게 해드렸습니다. 무엇보다 "이제 이건 신경 안 써도 되겠다"는 말씀을 들었을 때가 가장 보람 있었습니다. 저희의 일은 장비를 두고 오는 게 아니라, 그 뒤로 고객님이 본업에만 집중하실 수 있게 하는 것이니까요.`, '',
+    ...TAIL
+  ].join('\n');
+}
+
+function generateFor(ch, seed, kw, tone, region, model, pain, postType){
+  region = (region||'대구').trim();
+  model = (model||'').trim();
+  pain = (pain||'').trim();
+  postType = postType || 'review';
+  const kws = kw.split(',').map(s=>s.trim()).filter(Boolean);
+  if(!kws.length) kws.push('복사기렌탈');
+  const hashtags = kws.map(k=>'#'+k.replace(/\s/g,'')).join(' ');
+  const core = seed.trim() || '필요한 부분을 함께 살펴보고 도와드렸습니다.';
+  const firstLine = core.split(/[.\n]/)[0];
+  const painLine = pain.split(/[.\n]/)[0];
+
+  const painIntro = pain
+    ? `${pain}\n\n이런 고민, 생각보다 많은 분들이 하십니다. 혼자 결정하기엔 막막하고, 잘못 고르면 비용만 나가니까요.`
+    : `사무 환경을 정비할 때, 무엇부터 어떻게 해야 할지 막막하실 때가 있습니다. 혼자 결정하기 어려운 부분이죠.`;
+
+  const toneOpen = {
+    '전문가 · 신뢰':'그래서 저희가 현장에서 직접 살펴봤습니다.',
+    '친근 · 대화체':'그래서 저희가 옆에서 같이 고민해 드렸어요 😊',
+    '강력 · 세일즈':'그래서 가장 부담이 적은 방법을 먼저 찾아드렸습니다.',
+    '정보 · 교육형':'그래서 어떤 선택지가 있는지부터 정리해 드렸습니다.',
+  }[tone];
+
+  switch(ch.id){
+    case 'naver': return naverBody(postType, {region,model,kws,core,pain,painLine,painIntro,toneOpen});
+
+    case 'google': return [
+      `${region} ${kws[0]} — ${painLine||'사무기기 고민'}, 함께 해결한 이야기 | 한별시스템`,
+      '',
+      '안녕하세요, 한별시스템입니다.',
+      '',
+      painIntro,
+      '',
+      `${toneOpen} ${core}`,
+      '',
+      `저희는 ${region}·경북에서 기업의 전산 환경을 '파는 곳'이 아니라 '돌봐드리는 곳'을 지향합니다. 컴퓨터, 복사기, 프린터, 시놀로지(Synology) NAS, 데이터 백업까지 — 꼭 저희 제품이 아니어도, 무엇이 맞는지부터 같이 찾아드립니다.`,
+      '',
+      `Keywords: ${kws.join(', ')}, ${region} IT, Synology NAS, ${region} 사무기기 상담`,
+      '',
+      FOOTER,
+      '',
+      naverHashtags(region, kws)
+    ].join('\n');
+
+    case 'threads': return `${pain?pain.split(/[.\n]/)[0]+', 막막하셨죠.':'사무기기, 뭘 골라야 할지 막막할 때가 있죠.'}\n\n${firstLine}. 저흰 파는 사람보다 옆에서 같이 고민하는 사람이고 싶습니다.\n${region} 사무기기·NAS, 그냥 편하게 물어보세요.\n\n${hashtags} #${region}IT`;
+
+    case 'youtube': return `🎬 제목: ${painLine||region+' 사무기기 고민'}, 이렇게 해결했습니다 | 한별시스템\n\n📄 설명:\n${painIntro}\n\n${core}\n\n${region}·경북에서 기업 전산을 '돌봐드리는' 한별시스템입니다. 이 영상은 판매 영상이 아니라, 고객님의 어려움을 어떻게 함께 풀었는지에 대한 기록입니다.\n\n00:00 어떤 고민이었나\n00:40 함께 찾은 방법\n02:00 설치 / 세팅\n04:00 이후 달라진 점\n\n${FOOTER}\n${hashtags} #${region}사무기기 #NAS구축`;
+
+    case 'instagram': return `${pain?pain.split(/[.\n]/)[0]+'…':'사무기기, 혼자 결정하기 막막하셨다면'}\n\n${toneOpen} ${core}\n\n💡 저흰 "사세요"보다 "이게 맞을까요?"를 먼저 묻습니다.\n🤝 ${region}·경북 기업 전산, 곁에서 돕는 한별시스템\n☎ 053-588-7119 (상담 무료)\n\n.\n.\n${naverHashtags(region, kws)} #시놀로지 #업무고민해결`;
+
+    case 'facebook': return `${painIntro}\n\n${toneOpen} ${core}\n\n한별시스템은 ${region}·경북에서 기업의 전산 환경을 파는 곳이 아니라 돌봐드리는 곳이고자 합니다. 무엇이 필요한지 모르겠을 때, 부담 없이 물어보실 수 있는 동네 IT 담당자 — 그게 저희가 되고 싶은 모습입니다.\n\n${FOOTER}\n\n${hashtags} #${region}IT`;
+  }
+}
+
+document.getElementById('gen').onclick = async ()=>{
+  const seed = document.getElementById('seed').value;
+  if(!seed.trim()){ alert('한 일 / 핵심 메시지를 입력해 주세요.'); return; }
+  const kw = document.getElementById('kw').value;
+  const tone = document.getElementById('tone').value;
+  const region = document.getElementById('region').value;
+  const model = document.getElementById('model').value;
+  const service = document.getElementById('service').value;
+  const pain = document.getElementById('pain').value;
+  const solution = document.getElementById('solution').value;
+  const postType = document.getElementById('posttype').value;
+  const apiBase = document.getElementById('apiBase').value.trim();
+  const selected = [...document.querySelectorAll('#channels input:checked')].map(i=>i.value);
+  if(!selected.length){ alert('채널을 1개 이상 선택해 주세요.'); return; }
+
+  const typing = document.getElementById('typing');
+  typing.textContent = apiBase ? 'NAS의 AI 엔진이 채널별 글을 작성 중…' : '에이전트 공식으로 채널별 글을 작성 중…';
+  typing.style.display='block';
+  document.getElementById('empty').style.display='none';
+  const cards = document.getElementById('cards');
+  cards.innerHTML='';
+  drafts = {};
+
+  const payloadBase = {seed, kw, tone, region, model, service, pain, solution, postType, imageDesc: imageDescText};
+
+  // ① 각 채널 카드(껍데기)를 먼저 만들고, 본문만 '작성 중'으로 표시
+  const cardMap = {};
+  selected.forEach(id=>{
+    const ch = CHANNELS.find(c=>c.id===id);
+    const card = makeCardShell(ch);
+    setCardLoading(card, apiBase);
+    cardMap[id] = card;
+    cards.appendChild(card);
+  });
+
+  let doneCount = 0, batchCost = 0;
+  const total = selected.length;
+  const tick = ()=>{ typing.textContent = `작성 중… (${doneCount}/${total} 완료)`; };
+  tick();
+
+  // ② 병렬 생성. 완성되는 카드부터 본문만 채움(카드 위치 고정)
+  await Promise.all(selected.map(async id=>{
+    const ch = CHANNELS.find(c=>c.id===id);
+    let text, usage=null;
+    if(apiBase){
+      try{
+        const r = await aiFetch(apiBase, '/generate', {
+          method:'POST',
+          body: JSON.stringify({channel:id, ...payloadBase, history: getHistory(id)})
+        });
+        if(!r.ok) throw new Error('HTTP '+r.status);
+        const data = await r.json();
+        text = data.text || generateFor(ch, seed, kw, tone, region, model, pain, postType);
+        usage = data.usage || null;
+      }catch(e){
+        text = generateFor(ch, seed, kw, tone, region, model, pain, postType)
+             + `\n\n[⚠ AI 백엔드 연결 실패(${e.message}) → 공식으로 자동 생성됨. 백엔드 주소/실행 상태를 확인하세요.]`;
+      }
+    }else{
+      await new Promise(res=>setTimeout(res, 120));
+      text = generateFor(ch, seed, kw, tone, region, model, pain, postType);
+    }
+    drafts[id] = text;
+    if(usage && usage.usd){ batchCost += usage.usd; }
+    fillCard(cardMap[id], ch, text, usage);   // 카드 본문만 교체 (위치 그대로)
+    doneCount++; tick();
+  }));
+
+  // 비용 표시 갱신
+  document.getElementById('costNow').textContent = '$'+batchCost.toFixed(4);
+  totalCost += batchCost;
+  saveTotalCost();
+  document.getElementById('costTotal').textContent = '$'+totalCost.toFixed(4);
+
+  typing.textContent = `✓ ${total}개 채널 작성 완료` + (batchCost? ` · 비용 $${batchCost.toFixed(4)}` : '');
+  setTimeout(()=>{ typing.style.display='none'; }, 2500);
+  document.getElementById('bulkbar').style.display='flex';  // 전체 발행/이동 바 표시
+};
+
+// 카드 껍데기 (head + body자리 + foot). 본문은 나중에 채움
+function makeCardShell(ch){
+  const card = document.createElement('div');
+  card.className='card';
+  card.innerHTML = `
+    <div class="head">
+      <span class="dot" style="background:${ch.color}"></span>${ch.name}
+      <span class="meta" data-meta>${ch.mode} · 최대 ${ch.limit}자</span>
+    </div>
+    <div class="body" data-body></div>
+    <div class="foot" data-foot></div>`;
+  return card;
+}
+
+// 본문을 '작성 중'(스피너)로
+function setCardLoading(card, apiBase){
+  const msg = apiBase ? 'AI가 글을 작성 중…' : '공식으로 작성 중…';
+  card.querySelector('[data-body]').innerHTML =
+    `<div style="display:flex;align-items:center;gap:10px;color:var(--sub);min-height:140px">
+       <span class="spinner"></span><span>${msg}</span></div>`;
+  card.querySelector('[data-foot]').innerHTML = '';
+}
+
+// 완성 본문 + 버튼(미리보기/복사/예약) 채우기
+function fillCard(card, ch, text, usage){
+  const body = card.querySelector('[data-body]');
+  const foot = card.querySelector('[data-foot]');
+  body.innerHTML = `
+      <textarea id="ta-${ch.id}">${escapeHtml(text)}</textarea>
+      <div style="font-size:11px;color:var(--sub);margin-top:6px" id="cnt-${ch.id}"></div>`;
+  // 예약: 자동채널은 '예약 발행', 반자동은 '예약 알림'
+  foot.innerHTML = `
+      <button class="mini" data-act="regen">↻ 다시쓰기</button>
+      <button class="mini" data-act="preview">👁 미리보기</button>
+      <button class="mini" data-act="image">🎨 그림</button>
+      <button class="mini" data-act="video">🎬 영상</button>
+      <button class="mini" data-act="copy">⧉ 복사</button>
+      <button class="mini" data-act="schedule">🗓 자동발행(예약)</button>
+      <button class="mini pub" data-act="publish">⚡ 바로발행</button>`;
+
+  if(usage){
+    card.querySelector('[data-meta]').textContent =
+      `${ch.mode} · $${usage.usd.toFixed(4)} (${usage.input_tokens}+${usage.output_tokens}토큰)`;
+  }
+
+  const ta = body.querySelector('textarea');
+  const cnt = body.querySelector('#cnt-'+ch.id);
+  const upd = ()=>{ const n=ta.value.length;
+    cnt.textContent = `${n}자 ${n>ch.limit?'⚠ 한도 초과':''}`;
+    cnt.style.color = n>ch.limit?'var(--danger)':'var(--sub)'; };
+  ta.oninput = upd; upd();
+
+  foot.querySelector('[data-act=regen]').onclick=async ()=>{
+    setCardLoading(card, document.getElementById('apiBase').value.trim());
+    // 다시쓰기는 공식으로 빠르게(재호출 비용 절약). 필요시 생성 버튼으로 AI 재생성.
+    const t = generateFor(ch, document.getElementById('seed').value, document.getElementById('kw').value,
+      document.getElementById('tone').value, document.getElementById('region').value,
+      document.getElementById('model').value, document.getElementById('pain').value,
+      document.getElementById('posttype').value);
+    drafts[ch.id]=t; fillCard(card, ch, t, null);
+  };
+  foot.querySelector('[data-act=preview]').onclick=()=> openPreview(ch, ta.value);
+  foot.querySelector('[data-act=image]').onclick=()=> openImageGen(ch, ta.value);
+  foot.querySelector('[data-act=video]').onclick=()=> openVideoGen(ch, ta.value);
+  foot.querySelector('[data-act=copy]').onclick=()=>{
+    navigator.clipboard.writeText(ta.value);
+    const b=foot.querySelector('[data-act=copy]');b.textContent='✓ 복사됨';
+    setTimeout(()=>b.textContent='⧉ 복사',1200);
+  };
+  foot.querySelector('[data-act=schedule]').onclick=()=>{ drafts[ch.id]=ta.value; openSchedule(ch, ta.value); };
+  foot.querySelector('[data-act=publish]').onclick=()=>{
+    drafts[ch.id]=ta.value;
+    publishNow(ch, ta.value);
+    const b=foot.querySelector('[data-act=publish]'); b.textContent='✓ 발행됨';
+  };
+  // 편집 시 drafts 동기화 (전체 발행/이동에 반영)
+  ta.addEventListener('input', ()=>{ drafts[ch.id]=ta.value; });
+}
+
+function escapeHtml(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// ── 미리보기 모달 (실제 발행 모습) ──
+function previewImages(ch){
+  // 카드 전용 AI 그림 > 업로드 사진 순으로 사용
+  const imgs = [];
+  if(cardImages[ch.id]) imgs.push(cardImages[ch.id]);
+  mediaImageURLs.forEach(u=> imgs.push(u));
+  return imgs;
+}
+function imgStrip(urls, h){
+  if(!urls.length) return '';
+  return `<div style="display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px">`+
+    urls.slice(0,4).map(u=>`<img src="${u}" style="height:${h||150}px;border-radius:8px;object-fit:cover;max-width:100%"/>`).join('')+`</div>`;
+}
+
+// 본문의 [📷 사진 N …] 자리를 실제 사진으로 치환. 사진 부족하면 점선 박스.
+function renderBodyWithPhotos(text, urls){
+  const re = /\[📷[^\]]*\]/g;            // [📷 사진 1 — ...] 패턴
+  let idx = 0;
+  // 텍스트를 사진 마커 기준으로 쪼갠 뒤, 마커 위치에 사진/박스 삽입
+  let html = '';
+  let last = 0; let m;
+  while((m = re.exec(text)) !== null){
+    html += `<div style="white-space:pre-wrap">${escapeHtml(text.slice(last, m.index))}</div>`;
+    const url = urls[idx];
+    if(url){
+      html += `<img src="${url}" style="width:100%;max-height:340px;object-fit:cover;border-radius:10px;margin:12px 0"/>`;
+    }else{
+      html += `<div style="border:2px dashed #ccc;border-radius:10px;padding:34px 12px;text-align:center;
+        color:#aaa;margin:12px 0;font-size:13px">📷 ${escapeHtml(m[0].replace(/[\[\]]/g,''))}<br><span style="font-size:12px">여기에 사진이 들어갑니다 — 사진을 올리거나 'AI 그림'으로 채우세요</span></div>`;
+    }
+    idx++; last = m.index + m[0].length;
+  }
+  html += `<div style="white-space:pre-wrap">${escapeHtml(text.slice(last))}</div>`;
+  // 본문에 사진 마커가 하나도 없는데 사진이 있으면 맨 위에 한 장
+  if(idx===0 && urls.length){ html = imgStrip(urls.slice(0,1),200) + html; }
+  return html;
+}
+function openPreview(ch, text){
+  const urls = previewImages(ch);
+  document.getElementById('modalTitle').textContent = ch.name + ' 미리보기 (실제 발행 모습)';
+  let inner;
+
+  if(ch.id==='instagram'){
+    const main = urls[0];
+    inner = `<div style="max-width:380px;margin:0 auto;background:#fff;color:#111;border:1px solid #ddd;border-radius:10px;overflow:hidden">
+      <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;font-weight:600;font-size:13px">
+        <span style="width:28px;height:28px;border-radius:50%;background:linear-gradient(45deg,#f09433,#dc2743,#bc1888);display:inline-block"></span>hanbyul_system</div>
+      ${ main ? `<img src="${main}" style="width:100%;display:block"/>` : `<div style="aspect-ratio:1;display:flex;align-items:center;justify-content:center;background:#f0f0f0;color:#999;font-size:13px">사진 자리 — 아래 'AI 그림 넣기'로 채우세요</div>`}
+      <div style="padding:10px 12px;font-size:13px;white-space:pre-wrap;line-height:1.6">${escapeHtml(text.replace(/\[📷[^\]]*\]/g,'').trim())}</div>
+    </div>`;
+  } else if(ch.id==='youtube'){
+    const thumb = urls[0];
+    const title = text.split('\n').find(l=>l.includes('제목')) || text.split('\n')[0];
+    inner = `<div style="max-width:440px;margin:0 auto">
+      ${ thumb ? `<img src="${thumb}" style="width:100%;border-radius:10px;aspect-ratio:16/9;object-fit:cover"/>`
+               : `<div style="aspect-ratio:16/9;background:#000;border-radius:10px;display:flex;align-items:center;justify-content:center;color:#aaa">썸네일 자리 — 'AI 그림 넣기'</div>`}
+      <div style="color:#111;background:#fff;padding:10px;border-radius:0 0 10px 10px">
+        <div style="font-weight:700;font-size:15px;margin-bottom:6px">${escapeHtml(title.replace(/🎬|제목:/g,'').trim())}</div>
+        <div style="font-size:12px;color:#555;white-space:pre-wrap;line-height:1.6">${escapeHtml(text.replace(/\[📷[^\]]*\]/g,'').trim())}</div></div>
+    </div>`;
+  } else {
+    // 블로그(네이버/구글)/페북/쓰레드: 종이형 + 본문 [📷 사진N] 자리에 실제 사진 삽입
+    const lines = text.split('\n');
+    const title = lines[0];
+    const rest = lines.slice(1).join('\n');
+    inner = `<div class="preview-paper">
+      <div style="font-size:18px;font-weight:700;margin-bottom:14px">${escapeHtml(title)}</div>
+      ${renderBodyWithPhotos(rest, urls)}
+    </div>`;
+  }
+
+  const needImg = urls.length===0;
+  document.getElementById('modalBody').innerHTML =
+    `<div style="font-size:12px;color:var(--sub);margin-bottom:10px">${ch.name} · ${ch.mode} · ${needImg?'사진 없음 (AI 그림으로 채울 수 있어요)':'사진 '+urls.length+'장 포함'}</div>`+
+    inner+
+    `<div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
+       <button class="mini pub" id="pvMakeImg">🎨 AI 그림 만들어 넣기</button>
+       <button class="mini" id="pvMakeVid">🎬 영상 만들기(힉스필드)</button>
+     </div>`;
+  document.getElementById('modal').style.display='flex';
+  document.getElementById('pvMakeImg').onclick=()=> openImageGen(ch, text);
+  document.getElementById('pvMakeVid').onclick=()=> openVideoGen(ch, text);
+}
+
+// ── AI 그림 생성 (DALL·E) ──
+async function openImageGen(ch, text){
+  const apiBase = document.getElementById('apiBase').value.trim();
+  document.getElementById('modalTitle').textContent = ch.name + ' · AI 그림 생성';
+  // 글의 첫 줄(제목/핵심)으로 그림 프롬프트 기본값 제안
+  const firstLine = text.split('\n').find(l=>l.trim()) || '사무기기 설치 현장';
+  const region = document.getElementById('region').value || '대구';
+  const service = document.getElementById('service').value || '사무기기';
+  const defPrompt = `한국의 깔끔한 사무실 환경, ${service} 관련 전문적이고 신뢰감 있는 일러스트. 텍스트 없이. 밝고 정돈된 분위기. 주제: ${firstLine.slice(0,60)}`;
+  document.getElementById('modalBody').innerHTML = `
+    <div style="font-size:12px;color:var(--sub);margin-bottom:8px">실제 현장 사진이 가장 신뢰가 높습니다. 사진이 없을 때 보조용으로만 쓰세요.</div>
+    <label style="font-size:13px">그림 설명(프롬프트)</label>
+    <textarea id="imgPrompt" style="min-height:80px;margin:6px 0 12px">${escapeHtml(defPrompt)}</textarea>
+    <button class="btn" id="imgGo" style="margin:0">🎨 그림 생성 (약 $0.04)</button>
+    <div id="imgResult" style="margin-top:14px"></div>`;
+  document.getElementById('modal').style.display='flex';
+  document.getElementById('imgGo').onclick = async ()=>{
+    if(!apiBase){ alert('AI 그림은 백엔드가 필요합니다. 백엔드 주소를 확인하세요.'); return; }
+    const out=document.getElementById('imgResult');
+    out.innerHTML='<span class="spinner"></span> 그림 생성 중… (10~20초)';
+    try{
+      const r=await aiFetch(apiBase, '/generate-image', {
+        method:'POST',
+        body:JSON.stringify({prompt:document.getElementById('imgPrompt').value})
+      });
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      const d=await r.json();
+      if(!d.ok) throw new Error(d.error||'생성 실패');
+      if(d.usage&&d.usage.usd) addCost(d.usage.usd);
+      cardImages[ch.id] = d.url;   // 미리보기에서 자동 사용
+      out.innerHTML=`<img src="${d.url}" style="width:100%;border-radius:10px;border:1px solid var(--line)"/>
+        <div style="font-size:12px;color:var(--sub);margin-top:8px">✓ 이 그림이 미리보기에 자동 반영됩니다. 우클릭 → 저장도 가능. (비용 $0.04)</div>
+        <button class="mini pub" id="imgToPreview" style="margin-top:8px">👁 미리보기로 확인</button>`;
+      const btn=document.getElementById('imgToPreview'); if(btn) btn.onclick=()=>openPreview(ch, text);
+    }catch(e){
+      out.innerHTML='<span style="color:var(--danger)">⚠ 실패: '+e.message+'</span><br><span style="font-size:12px;color:var(--sub)">OpenAI 키가 백엔드에 설정돼야 합니다. (key.txt에 OpenAI 키를 넣거나, Claude+OpenAI 둘 다 설정)</span>';
+    }
+  };
+}
+
+// ── AI 영상 생성 (Higgsfield) ──
+async function openVideoGen(ch, text){
+  const apiBase = document.getElementById('apiBase').value.trim();
+  const firstLine = text.split('\n').find(l=>l.trim()) || '사무기기 설치 현장';
+  // 업로드 사진이나 이미 만든 카드 그림이 있으면 image→video, 없으면 text→video
+  const baseImg = cardImages[ch.id] || mediaImageURLs[0] || '';
+  document.getElementById('modalTitle').textContent = ch.name + ' · AI 영상 만들기 (힉스필드)';
+  document.getElementById('modalBody').innerHTML = `
+    <div style="font-size:12px;color:var(--sub);margin-bottom:8px">
+      ${baseImg ? '업로드/생성한 이미지를 움직이는 영상으로 만듭니다 (image→video).' : '텍스트로 영상을 만듭니다 (text→video). 사진을 먼저 넣으면 더 정확합니다.'}
+    </div>
+    ${baseImg?`<img src="${baseImg}" style="width:120px;border-radius:8px;margin-bottom:10px"/>`:''}
+    <label style="font-size:13px">영상 설명(프롬프트)</label>
+    <textarea id="vidPrompt" style="min-height:70px;margin:6px 0 12px">${escapeHtml('한별시스템 '+(document.getElementById('service').value||'사무기기')+' 현장. '+firstLine.slice(0,50)+'. 깔끔하고 신뢰감 있는 분위기, 부드러운 카메라 움직임.')}</textarea>
+    <button class="btn" id="vidGo" style="margin:0">🎬 영상 생성 시작</button>
+    <div id="vidResult" style="margin-top:14px"></div>`;
+  document.getElementById('modal').style.display='flex';
+  document.getElementById('vidGo').onclick = async ()=>{
+    if(!apiBase){ alert('영상 생성은 백엔드가 필요합니다.'); return; }
+    const out=document.getElementById('vidResult');
+    out.innerHTML='<span class="spinner"></span> 영상 생성 중… (수십 초~수 분 걸릴 수 있어요)';
+    try{
+      const r=await aiFetch(apiBase, '/generate-video', {
+        method:'POST',
+        body:JSON.stringify({ prompt:document.getElementById('vidPrompt').value, imageUrl: baseImg && baseImg.startsWith('http')? baseImg : '' })
+      });
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      const d=await r.json();
+      if(!d.ok) throw new Error(d.error||'생성 실패');
+      if(d.status==='completed' && d.url){
+        cardVideos[ch.id] = d.url;   // 게시판/미리보기에서 사용
+        out.innerHTML=`<video src="${d.url}" controls style="width:100%;border-radius:10px"></video>
+          <div style="font-size:12px;color:var(--sub);margin-top:8px">✓ 영상 완성. 게시판에 함께 저장됩니다. 우클릭 → 저장도 가능.</div>`;
+      } else if(d.status==='pending'){
+        out.innerHTML=`<div style="color:var(--warn)">⏳ 아직 생성 중입니다. 힉스필드에서 처리 중이니 잠시 후 다시 시도하거나, 힉스필드 대시보드에서 확인하세요.</div>`;
+      } else {
+        out.innerHTML=`<div style="color:var(--sub)">요청이 제출되었습니다. (응답: ${escapeHtml(JSON.stringify(d).slice(0,200))})</div>`;
+      }
+    }catch(e){
+      out.innerHTML='<span style="color:var(--danger)">⚠ 실패: '+e.message+'</span><br><span style="font-size:12px;color:var(--sub)">힉스필드 키가 필요합니다. key.txt에 "hf:&lt;키&gt;" 줄을 추가하세요. (엔드포인트는 힉스필드 문서 기준 조정 필요할 수 있음)</span>';
+    }
+  };
+}
+
+// ── 예약 모달 ──
+function openSchedule(ch, text){
+  const auto = ch.mode.includes('API');
+  const def = new Date(Date.now()+3600*1000);
+  const pad=n=>String(n).padStart(2,'0');
+  const defVal = `${def.getFullYear()}-${pad(def.getMonth()+1)}-${pad(def.getDate())}T${pad(def.getHours())}:${pad(def.getMinutes())}`;
+  document.getElementById('modalTitle').textContent = ch.name + (auto?' 예약 발행':' 예약 알림');
+  document.getElementById('modalBody').innerHTML = `
+    <div style="margin-bottom:12px;color:var(--sub);font-size:13px">
+      ${auto ? 'API 자동 발행 채널입니다. 지정 시간에 자동 발행됩니다.(NAS 연동 시)'
+             : '이 채널은 직접 발행이 안전합니다. 지정 시간에 \"발행하세요\" 알림으로 대기열에 등록됩니다.'}
+    </div>
+    <label style="font-size:13px">발행 일시</label>
+    <input type="datetime-local" id="schWhen" value="${defVal}" style="margin:6px 0 16px"/>
+    <button class="btn" id="schConfirm" style="margin:0">대기열에 등록</button>`;
+  document.getElementById('modal').style.display='flex';
+  document.getElementById('schConfirm').onclick=()=>{
+    const v = document.getElementById('schWhen').value;
+    addToQueue(ch, text, v ? new Date(v) : new Date());
+    document.getElementById('modal').style.display='none';
+    document.querySelector('.tabbar .tb[data-view=queue]').click();
+  };
+}
+
+document.getElementById('modalClose').onclick=()=>{ document.getElementById('modal').style.display='none'; };
+document.getElementById('modal').onclick=e=>{ if(e.target.id==='modal') document.getElementById('modal').style.display='none'; };
+
+// ── 누적 크레딧 저장/복원 ──
+let totalCost = 0;
+try{ totalCost = parseFloat(localStorage.getItem('hanbyul_totalCost')||'0')||0; }catch(e){}
+function saveTotalCost(){ try{ localStorage.setItem('hanbyul_totalCost', String(totalCost)); }catch(e){} }
+document.addEventListener('DOMContentLoaded', ()=>{
+  document.getElementById('costTotal').textContent = '$'+totalCost.toFixed(4);
+});
+document.getElementById('costTotal').textContent = '$'+totalCost.toFixed(4);
+document.getElementById('costReset').onclick=()=>{
+  if(confirm('누적 사용 비용을 0으로 초기화할까요?')){ totalCost=0; saveTotalCost();
+    document.getElementById('costTotal').textContent='$0.0000'; }
+};
+function addCost(usd){
+  totalCost += usd; saveTotalCost();
+  document.getElementById('costTotal').textContent = '$'+totalCost.toFixed(4);
+}
+
+// ── 채널별 발행 기록(에이전트 메모리) — 발행 대기열에 넣을 때 학습용으로 저장 ──
+function getHistory(channel){
+  try{ const v=JSON.parse(localStorage.getItem('hanbyul_hist_'+channel)); return Array.isArray(v)?v:[]; }catch(e){ return []; }
+}
+function saveHistory(channel, text){
+  try{
+    const arr=getHistory(channel);
+    arr.unshift(text);                       // 최신을 앞에
+    localStorage.setItem('hanbyul_hist_'+channel, JSON.stringify(arr.slice(0,10))); // 최근 10건 유지
+  }catch(e){}
+}
+
+function addToQueue(ch, text, when){
+  when = when || new Date(Date.now()+ (queue.length+1)*3600*1000);
+  queue.push({ch, text, when, status:'대기'});
+  saveHistory(ch.id, text);   // 채택(예약)한 글을 채널 메모리에 학습 저장
+  renderQueue();
+}
+function renderQueue(){
+  document.getElementById('qcount').textContent = queue.length;
+  const q = document.getElementById('queue');
+  document.getElementById('qempty').style.display = queue.length?'none':'block';
+  q.innerHTML='';
+  // 시간순 정렬
+  queue.sort((a,b)=>a.when-b.when);
+  queue.forEach((item,i)=>{
+    const el=document.createElement('div');el.className='qitem';
+    const t=item.when; const pad=n=>String(n).padStart(2,'0');
+    const ts=`${t.getMonth()+1}/${t.getDate()} ${pad(t.getHours())}:${pad(t.getMinutes())}`;
+    const auto=item.ch.mode.includes('API');
+    el.innerHTML=`<span class="dot" style="background:${item.ch.color}"></span>
+      <b>${item.ch.name}</b>
+      <span style="color:var(--sub)">${item.text.slice(0,24).replace(/\n/g,' ')}…</span>
+      <span class="badge wait">${auto?'자동발행':'발행알림'} ${ts}</span>
+      <span class="mini" data-del="${i}" style="margin-left:8px;cursor:pointer">✕</span>`;
+    el.querySelector('[data-del]').onclick=()=>{ queue.splice(i,1); renderQueue(); };
+    q.appendChild(el);
+  });
+}
+
+function showView(v){
+  document.querySelectorAll('.tabbar .tb').forEach(x=>x.classList.toggle('on', x.dataset.view===v));
+  ['draft','queue','boards','stats'].forEach(name=>{
+    document.getElementById('view-'+name).style.display = (name===v)?'block':'none';
+  });
+  if(v==='boards') renderBoards();
+  if(v==='stats') renderStats();
+}
+document.querySelectorAll('.tabbar .tb').forEach(tb=>{ tb.onclick=()=> showView(tb.dataset.view); });
+
+// ════════════════════════════════════════════════
+//  발행 · 게시판 · 성과 분석
+// ════════════════════════════════════════════════
+
+// 게시판 저장소: 채널별 발행물 목록 (localStorage)
+function getBoard(ch){ try{ const v=JSON.parse(localStorage.getItem('hanbyul_board_'+ch)); return Array.isArray(v)?v:[]; }catch(e){ return []; } }
+function saveBoard(ch, arr){ try{ localStorage.setItem('hanbyul_board_'+ch, JSON.stringify(arr.slice(0,100))); }catch(e){} }
+function addToBoard(chId, item){
+  const arr=getBoard(chId);
+  arr.unshift(item);              // 최신 앞에
+  saveBoard(chId, arr);
+}
+
+// 발행물 1건 만들기 (현재 카드 상태 기준)
+function makePost(ch, text, status){
+  return {
+    id: Date.now()+'_'+ch.id+'_'+Math.floor(Math.random()*1000),
+    channel: ch.id, channelName: ch.name,
+    text,
+    image: cardImages[ch.id] || mediaImageURLs[0] || '',
+    video: cardVideos[ch.id] || '',
+    status: status||'발행',         // 발행 / 예약 / 임시
+    at: new Date().toISOString(),
+    views: 0, clicks: 0,
+  };
+}
+
+// 바로발행 (실제 채널 API 자동발행은 NAS 연동 시. 지금은 '발행 처리'로 게시판에 기록)
+function publishNow(ch, text){
+  addToBoard(ch.id, makePost(ch, text, '발행'));
+  saveHistory(ch.id, text);
+  alert(ch.name+' 바로발행 처리되었습니다. (채널 게시판에 저장됨)\n※ 실제 채널 자동 업로드는 NAS+채널 API 연동 후 작동합니다.');
+}
+
+// ── 상단 전체 처리 버튼 ──
+document.getElementById('bulkPublish').onclick=()=>{
+  const ids=Object.keys(drafts); if(!ids.length){ alert('생성된 글이 없습니다.'); return; }
+  if(!confirm(ids.length+'개 채널을 모두 바로발행 처리할까요?')) return;
+  ids.forEach(id=>{ const ch=CHANNELS.find(c=>c.id===id); addToBoard(id, makePost(ch, drafts[id], '발행')); saveHistory(id, drafts[id]); });
+  alert(ids.length+'개 채널 발행 처리 완료. 채널 게시판에서 확인하세요.');
+  showView('boards');
+};
+document.getElementById('bulkSchedule').onclick=()=>{
+  const ids=Object.keys(drafts); if(!ids.length){ alert('생성된 글이 없습니다.'); return; }
+  ids.forEach(id=>{ const ch=CHANNELS.find(c=>c.id===id); addToQueue(ch, drafts[id]); });
+  alert(ids.length+'개 채널을 예약 대기열에 등록했습니다.');
+  showView('queue');
+};
+document.getElementById('bulkMove').onclick=()=>{
+  const ids=Object.keys(drafts); if(!ids.length){ alert('생성된 글이 없습니다.'); return; }
+  ids.forEach(id=>{ const ch=CHANNELS.find(c=>c.id===id); addToBoard(id, makePost(ch, drafts[id], '임시')); });
+  alert(ids.length+'개 채널 결과를 게시판으로 이동·저장했습니다.');
+  showView('boards');
+};
+
+// ── 채널 게시판 렌더 ──
+let curBoard = 'naver';
+function renderBoards(){
+  const tabs=document.getElementById('boardTabs');
+  tabs.innerHTML = CHANNELS.map(c=>{
+    const n=getBoard(c.id).length;
+    return `<span class="tb ${c.id===curBoard?'on':''}" data-b="${c.id}" style="cursor:pointer">
+      <span class="dot" style="background:${c.color};display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px"></span>${c.name} <span class="badge">${n}</span></span>`;
+  }).join('');
+  tabs.querySelectorAll('[data-b]').forEach(t=> t.onclick=()=>{ curBoard=t.dataset.b; renderBoards(); });
+
+  const ch=CHANNELS.find(c=>c.id===curBoard);
+  const posts=getBoard(curBoard);
+  const wrap=document.getElementById('boardContent');
+  if(!posts.length){ wrap.innerHTML=`<div class="empty">${ch.name} 게시판이 비어 있습니다. 생성 결과에서 발행하거나 이동하세요.</div>`; return; }
+  wrap.innerHTML = posts.map(p=>`
+    <div class="card" style="margin-bottom:12px">
+      <div class="head">
+        <span class="dot" style="background:${ch.color}"></span>${ch.name}
+        <span class="badge ${p.status==='발행'?'ok':'wait'}" style="margin-left:8px">${p.status}</span>
+        <span class="meta">${new Date(p.at).toLocaleString('ko-KR')}</span>
+      </div>
+      <div class="body">
+        ${p.image?`<img src="${p.image}" style="height:90px;border-radius:8px;object-fit:cover;margin-bottom:8px"/>`:''}
+        ${p.video?`<div style="margin-bottom:8px"><video src="${p.video}" controls style="max-height:160px;border-radius:8px;width:100%"></video><div style="font-size:11px;color:var(--accent2)">🎬 영상 업로드됨</div></div>`:''}
+        <div style="font-size:13px;color:var(--sub);white-space:pre-wrap;max-height:90px;overflow:auto">${escapeHtml(p.text.slice(0,300))}…</div>
+        <div style="font-size:12px;color:var(--sub);margin-top:8px">👁 노출 ${p.views} · 🖱 클릭 ${p.clicks}</div>
+      </div>
+      <div class="foot">
+        <button class="mini" data-pv="${p.id}">👁 미리보기</button>
+        <button class="mini" data-del="${p.id}">🗑 삭제</button>
+      </div>
+    </div>`).join('');
+  wrap.querySelectorAll('[data-del]').forEach(b=> b.onclick=()=>{
+    saveBoard(curBoard, getBoard(curBoard).filter(x=>x.id!==b.dataset.del)); renderBoards();
+  });
+  wrap.querySelectorAll('[data-pv]').forEach(b=> b.onclick=()=>{
+    const p=getBoard(curBoard).find(x=>x.id===b.dataset.pv);
+    if(p){ if(p.image) cardImages[ch.id]=p.image; openPreview(ch, p.text); }
+  });
+}
+
+// ── 성과 분석 렌더 (직관적 막대 + 클릭 입력) ──
+function renderStats(){
+  const area=document.getElementById('statsArea');
+  const rows=CHANNELS.map(c=>{
+    const posts=getBoard(c.id);
+    const views=posts.reduce((s,p)=>s+(p.views||0),0);
+    const clicks=posts.reduce((s,p)=>s+(p.clicks||0),0);
+    const ctr=views? (clicks/views*100):0;
+    return {c, count:posts.length, views, clicks, ctr};
+  });
+  const maxViews=Math.max(1,...rows.map(r=>r.views));
+  const totalV=rows.reduce((s,r)=>s+r.views,0), totalC=rows.reduce((s,r)=>s+r.clicks,0);
+  area.innerHTML = `
+    <div style="display:flex;gap:12px;margin-bottom:18px;flex-wrap:wrap">
+      <div class="card" style="flex:1;min-width:120px;padding:14px"><div style="font-size:12px;color:var(--sub)">총 발행물</div><div style="font-size:24px;font-weight:700">${rows.reduce((s,r)=>s+r.count,0)}</div></div>
+      <div class="card" style="flex:1;min-width:120px;padding:14px"><div style="font-size:12px;color:var(--sub)">총 노출수</div><div style="font-size:24px;font-weight:700;color:var(--accent)">${totalV.toLocaleString()}</div></div>
+      <div class="card" style="flex:1;min-width:120px;padding:14px"><div style="font-size:12px;color:var(--sub)">총 클릭수</div><div style="font-size:24px;font-weight:700;color:var(--accent2)">${totalC.toLocaleString()}</div></div>
+      <div class="card" style="flex:1;min-width:120px;padding:14px"><div style="font-size:12px;color:var(--sub)">평균 클릭률</div><div style="font-size:24px;font-weight:700">${totalV?(totalC/totalV*100).toFixed(1):0}%</div></div>
+    </div>`+
+    rows.map(r=>`
+    <div class="card" style="margin-bottom:10px;padding:13px 15px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <span class="dot" style="background:${r.c.color}"></span>
+        <b style="cursor:pointer;text-decoration:underline" data-go="${r.c.id}">${r.c.name}</b>
+        <span style="font-size:12px;color:var(--sub)">발행 ${r.count}건</span>
+        <span style="margin-left:auto;font-size:12px;color:var(--sub)">클릭률 ${r.ctr.toFixed(1)}%</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;font-size:12px;margin-bottom:5px">
+        <span style="width:46px;color:var(--sub)">노출</span>
+        <div style="flex:1;background:var(--panel2);border-radius:6px;overflow:hidden;height:14px">
+          <div style="width:${r.views/maxViews*100}%;height:100%;background:var(--accent)"></div></div>
+        <span data-edit="views" data-ch="${r.c.id}" style="width:60px;text-align:right;cursor:pointer">${r.views.toLocaleString()}</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;font-size:12px">
+        <span style="width:46px;color:var(--sub)">클릭</span>
+        <div style="flex:1;background:var(--panel2);border-radius:6px;overflow:hidden;height:14px">
+          <div style="width:${r.views? r.clicks/r.views*100:0}%;height:100%;background:var(--accent2)"></div></div>
+        <span data-edit="clicks" data-ch="${r.c.id}" style="width:60px;text-align:right;cursor:pointer">${r.clicks.toLocaleString()}</span>
+      </div>
+    </div>`).join('') +
+    `<div style="font-size:12px;color:var(--sub);margin-top:8px">※ 노출·클릭 숫자를 클릭하면 직접 입력할 수 있습니다. (채널 API 연동 시 자동 수집으로 전환)</div>`;
+
+  area.querySelectorAll('[data-go]').forEach(b=> b.onclick=()=>{ curBoard=b.dataset.go; showView('boards'); });
+  area.querySelectorAll('[data-edit]').forEach(s=> s.onclick=()=>{
+    const cur=parseInt(s.textContent.replace(/[^0-9]/g,''))||0;
+    const v=prompt(s.dataset.edit==='views'?'노출수 입력':'클릭수 입력', cur);
+    if(v===null) return;
+    const n=parseInt(v)||0;
+    // 가장 최근 발행물에 반영(간단화). 발행물 없으면 무시.
+    const arr=getBoard(s.dataset.ch); if(!arr.length){ alert('이 채널엔 발행물이 없습니다.'); return; }
+    arr[0][s.dataset.edit]=n; saveBoard(s.dataset.ch, arr); renderStats();
+  });
+}
+</script>
+</body>
+</html>

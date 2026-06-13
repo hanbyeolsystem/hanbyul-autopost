@@ -1,0 +1,8 @@
+# 🔒 API 키 — 절대 외부 공유/업로드 금지
+AI백엔드/key.txt
+**/key.txt
+*.key
+.env
+
+# 의존성/캐시
+node_modules/
