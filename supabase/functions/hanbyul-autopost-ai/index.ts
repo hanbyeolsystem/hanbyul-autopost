@@ -1,19 +1,28 @@
 // 한별시스템 AI 발행 백엔드 (Supabase Edge Function)
 // ─────────────────────────────────────────────
-// 키는 Supabase Secret(ANTHROPIC_API_KEY)에서만 읽고, 브라우저에는 노출되지 않음.
+// 키는 Supabase Secret에서만 읽고, 브라우저에는 노출되지 않음.
 //
 // 라우팅 (function 슬러그 기준):
 //   GET  /functions/v1/hanbyul-autopost-ai/health
-//   POST /functions/v1/hanbyul-autopost-ai/generate
-//   POST /functions/v1/hanbyul-autopost-ai/analyze-image
+//   POST /functions/v1/hanbyul-autopost-ai/generate          — 글 생성 (Claude)
+//   POST /functions/v1/hanbyul-autopost-ai/analyze-image     — 사진 분석 (Claude Vision)
+//   POST /functions/v1/hanbyul-autopost-ai/generate-image    — 그림 생성 (DALL·E)
+//   POST /functions/v1/hanbyul-autopost-ai/google/connect    — Google OAuth 코드 → refresh_token
+//   POST /functions/v1/hanbyul-autopost-ai/publish/google    — Blogger 글 게시
 //
 // CORS: ALLOW_ORIGIN 환경변수(없으면 *). Pages URL 정해지면 좁히세요.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
-const ANTHROPIC_KEY = Deno.env.get("ANTHROPIC_API_KEY") || "";
-const OPENAI_KEY    = Deno.env.get("OPENAI_API_KEY") || "";
-const ALLOW_ORIGIN  = Deno.env.get("ALLOW_ORIGIN") || "*";
+const ANTHROPIC_KEY      = Deno.env.get("ANTHROPIC_API_KEY") || "";
+const OPENAI_KEY         = Deno.env.get("OPENAI_API_KEY") || "";
+const ALLOW_ORIGIN       = Deno.env.get("ALLOW_ORIGIN") || "*";
+
+// Google / Blogger
+const GOOGLE_CLIENT_ID     = Deno.env.get("GOOGLE_CLIENT_ID") || "";
+const GOOGLE_CLIENT_SECRET = Deno.env.get("GOOGLE_CLIENT_SECRET") || "";
+const GOOGLE_REFRESH_TOKEN = Deno.env.get("GOOGLE_REFRESH_TOKEN") || "";
+const GOOGLE_BLOG_ID       = Deno.env.get("GOOGLE_BLOG_ID") || "";
 
 const COMPANY = {
   name: "한별시스템",
@@ -197,6 +206,125 @@ async function generateImage(promptText: string) {
   return { url: d.data[0].url, usage: { usd: 0.04 } };
 }
 
+// ──────────────────────────────────────────────
+// Google OAuth + Blogger
+// ──────────────────────────────────────────────
+
+function escHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// 평문 본문 → Blogger용 간단 HTML. [📷 사진 N — ...] 마커는 placeholder 박스로.
+function textToBloggerHtml(text: string): string {
+  const photoMarker = /\[📷[^\]]*\]/g;
+  const replaced = text.replace(photoMarker, (m) =>
+    `\n<!--PHOTO-->${m.replace(/[\[\]]/g, "")}<!--/PHOTO-->\n`
+  );
+  const paragraphs = replaced.split(/\n{2,}/);
+  return paragraphs.map((para) => {
+    const trimmed = para.trim();
+    if (!trimmed) return "";
+    if (trimmed.startsWith("<!--PHOTO-->")) {
+      const caption = trimmed.replace(/<!--\/?PHOTO-->/g, "").trim();
+      return `<div style="border:2px dashed #ccc;border-radius:10px;padding:24px 12px;text-align:center;color:#aaa;margin:14px 0;font-size:13px">📷 ${escHtml(caption)}</div>`;
+    }
+    return `<p>${escHtml(trimmed).replace(/\n/g, "<br/>")}</p>`;
+  }).filter(Boolean).join("\n");
+}
+
+async function googleAccessToken(): Promise<string> {
+  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET)
+    throw new Error("GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET 시크릿이 필요합니다.");
+  if (!GOOGLE_REFRESH_TOKEN)
+    throw new Error("GOOGLE_REFRESH_TOKEN 시크릿이 없습니다. 먼저 콘솔에서 '구글 블로그 연결'을 한 번 진행하세요.");
+  const r = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: GOOGLE_CLIENT_ID,
+      client_secret: GOOGLE_CLIENT_SECRET,
+      refresh_token: GOOGLE_REFRESH_TOKEN,
+      grant_type: "refresh_token",
+    }).toString(),
+  });
+  if (!r.ok) throw new Error("Google token refresh " + r.status + ": " + (await r.text()).slice(0, 200));
+  const d = await r.json();
+  return d.access_token as string;
+}
+
+async function googleConnect(code: string, redirect_uri: string) {
+  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET)
+    throw new Error("GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET 시크릿이 먼저 등록되어야 합니다.");
+  const r = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: GOOGLE_CLIENT_ID,
+      client_secret: GOOGLE_CLIENT_SECRET,
+      code,
+      redirect_uri,
+      grant_type: "authorization_code",
+    }).toString(),
+  });
+  if (!r.ok) throw new Error("Google exchange " + r.status + ": " + (await r.text()).slice(0, 200));
+  const d = await r.json();
+  if (!d.refresh_token) {
+    throw new Error("refresh_token이 발급되지 않았습니다. 동의 화면에 'prompt=consent'가 적용되도록 콘솔에서 다시 연결을 시도하세요.");
+  }
+
+  // 한별 계정에 연결된 블로그 목록 조회
+  const blogsR = await fetch("https://www.googleapis.com/blogger/v3/users/self/blogs", {
+    headers: { Authorization: "Bearer " + d.access_token },
+  });
+  const blogs: { id: string; name: string; url: string }[] = [];
+  if (blogsR.ok) {
+    const bd = await blogsR.json();
+    for (const b of (bd.items || [])) {
+      blogs.push({ id: b.id, name: b.name, url: b.url });
+    }
+  }
+
+  return { refresh_token: d.refresh_token as string, blogs };
+}
+
+async function publishGoogle(p: {
+  title: string;
+  content: string;
+  labels?: string[];
+  blogId?: string;
+  isDraft?: boolean;
+}) {
+  const blogId = p.blogId || GOOGLE_BLOG_ID;
+  if (!blogId) throw new Error("blogId 또는 GOOGLE_BLOG_ID 시크릿이 필요합니다.");
+  const accessToken = await googleAccessToken();
+
+  const isHtml = /<\w+[^>]*>/.test(p.content);
+  const html = isHtml ? p.content : textToBloggerHtml(p.content);
+
+  const body = {
+    kind: "blogger#post",
+    title: p.title,
+    content: html,
+    labels: p.labels || [],
+  };
+
+  const qs = p.isDraft ? "?isDraft=true" : "";
+  const r = await fetch(
+    `https://www.googleapis.com/blogger/v3/blogs/${blogId}/posts${qs}`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer " + accessToken,
+      },
+      body: JSON.stringify(body),
+    },
+  );
+  if (!r.ok) throw new Error("Blogger publish " + r.status + ": " + (await r.text()).slice(0, 300));
+  const d = await r.json();
+  return { id: d.id as string, url: d.url as string, published: d.published as string };
+}
+
 function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": ALLOW_ORIGIN,
@@ -228,6 +356,14 @@ Deno.serve(async (req: Request) => {
         imagegen: !!OPENAI_KEY,
         videogen: false,
         channels: Object.keys(CHANNEL_AGENTS),
+        publishers: {
+          google: {
+            configured: !!(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET),
+            connected: !!GOOGLE_REFRESH_TOKEN,
+            blog_id_set: !!GOOGLE_BLOG_ID,
+            client_id_hint: GOOGLE_CLIENT_ID ? GOOGLE_CLIENT_ID.slice(0, 12) + "…" : "",
+          },
+        },
       });
     }
 
@@ -249,7 +385,37 @@ Deno.serve(async (req: Request) => {
       return jsonResponse(200, { ok: true, url: out.url, usage: out.usage });
     }
 
-    return jsonResponse(404, { ok: false, error: "Not found. 사용: GET /health, POST /generate, /analyze-image, /generate-image" });
+    if (req.method === "POST" && sub === "/google/connect") {
+      const p = await req.json() as { code: string; redirect_uri: string };
+      if (!p.code || !p.redirect_uri) {
+        return jsonResponse(400, { ok: false, error: "code, redirect_uri 필요" });
+      }
+      const out = await googleConnect(p.code, p.redirect_uri);
+      return jsonResponse(200, { ok: true, ...out });
+    }
+
+    if (req.method === "POST" && sub === "/publish/google") {
+      const p = await req.json() as {
+        title?: string;
+        content?: string;
+        labels?: string[];
+        blogId?: string;
+        isDraft?: boolean;
+      };
+      if (!p.title || !p.content) {
+        return jsonResponse(400, { ok: false, error: "title, content 필요" });
+      }
+      const out = await publishGoogle({
+        title: p.title,
+        content: p.content,
+        labels: p.labels,
+        blogId: p.blogId,
+        isDraft: p.isDraft,
+      });
+      return jsonResponse(200, { ok: true, ...out });
+    }
+
+    return jsonResponse(404, { ok: false, error: "Not found. 사용: GET /health, POST /generate, /analyze-image, /generate-image, /google/connect, /publish/google" });
   } catch (e) {
     return jsonResponse(500, { ok: false, error: (e as Error).message || String(e) });
   }

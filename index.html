@@ -3,8 +3,14 @@
 <head>
 <meta charset="utf-8">
 <title>한별시스템 · AI 멀티채널 자동발행</title>
-<meta http-equiv="refresh" content="0; url=%EC%BD%98%EC%86%94/hanbyul-autopost-dashboard.html">
 <style>body{font-family:system-ui;background:#0f1115;color:#e5e7eb;display:grid;place-items:center;height:100vh;margin:0}a{color:#7c9aff}</style>
+<script>
+  // 콘솔로 즉시 이동 — OAuth 등에서 붙어 오는 ?query 도 함께 전달
+  (function(){
+    var dest = '%EC%BD%98%EC%86%94/hanbyul-autopost-dashboard.html' + location.search + location.hash;
+    location.replace(dest);
+  })();
+</script>
 </head>
 <body>
 <div style="text-align:center">

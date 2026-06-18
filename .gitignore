@@ -2,5 +2,11 @@
 *.key
 .env
 
+# 개인 메모 / 시크릿 임시 보관
+구글블로그.txt
+secrets/
+*.secret
+notes.local.*
+
 # 의존성/캐시
 node_modules/
