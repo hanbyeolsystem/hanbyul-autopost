@@ -4,6 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>한별시스템 · AI 멀티채널 자동발행 콘솔</title>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <style>
   :root{
     --bg:#0d1117; --panel:#161b22; --panel2:#1c2230; --line:#2a3242;
@@ -1190,6 +1191,52 @@ async function publishNow(ch, text){
     } catch (e) {
       alert('❌ 유튜브 영상 업로드 실패\n' + (e.message || e) + '\n\n해결 단서:\n- 채널 연결 박스에서 "구글 계정으로 연결" 을 한 번 더 눌러 YouTube 권한도 받았는지\n- Google Cloud Console 에서 YouTube Data API v3 가 활성화돼 있는지');
     }
+    return;
+  }
+  if (ch.id === 'naver') {
+    // 반자동: 텍스트는 클립보드 + 사진은 ZIP 다운로드 + 네이버 글쓰기 새 탭 + 안내
+    const imgFiles = media.filter(f => f.type.startsWith('image/'));
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (e) {
+      alert('클립보드 복사 실패: ' + e.message);
+      return;
+    }
+    let zipMsg = '';
+    if (imgFiles.length && typeof JSZip !== 'undefined') {
+      try {
+        const zip = new JSZip();
+        // 순서 보존: 01_원본명.확장자, 02_…
+        for (let i = 0; i < imgFiles.length; i++) {
+          const f = imgFiles[i];
+          const idx = String(i + 1).padStart(2, '0');
+          const ext = (f.name.match(/\.[^.]+$/) || ['.jpg'])[0];
+          zip.file(`${idx}_사진${ext}`, f);
+        }
+        const blob = await zip.generateAsync({ type: 'blob' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const ts = new Date();
+        const ymd = `${ts.getFullYear()}${String(ts.getMonth()+1).padStart(2,'0')}${String(ts.getDate()).padStart(2,'0')}_${String(ts.getHours()).padStart(2,'0')}${String(ts.getMinutes()).padStart(2,'0')}`;
+        a.download = `네이버블로그_사진_${ymd}.zip`;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(()=>URL.revokeObjectURL(url), 2000);
+        zipMsg = `\n📦 사진 ${imgFiles.length}장이 ZIP 으로 내려받아졌습니다 (다운로드 폴더 확인).`;
+      } catch (e) {
+        zipMsg = `\n⚠ 사진 ZIP 생성 실패: ${e.message} — 사진은 따로 첨부해주세요.`;
+      }
+    } else if (imgFiles.length) {
+      zipMsg = `\n⚠ ZIP 라이브러리 미로드 — 사진은 따로 첨부해주세요.`;
+    }
+    addToBoard(ch.id, makePost(ch, text, '발행', { url: 'https://blog.naver.com/' }));
+    saveHistory(ch.id, text);
+    window.open('https://blog.naver.com/GoBlogWrite.naver', '_blank');
+    alert(
+      `✅ 네이버 블로그 발행 준비 완료\n\n` +
+      `📋 글은 클립보드에 복사됨 → 네이버 글쓰기 창에 Ctrl+V${zipMsg}\n\n` +
+      `📷 본문의 [📷 사진 N — ...] 자리에 사진을 차례대로 끌어다 놓으세요.`
+    );
     return;
   }
   if (ch.id === 'google') {
