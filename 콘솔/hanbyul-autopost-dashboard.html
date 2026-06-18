@@ -1206,9 +1206,15 @@ function renderStats(){
 // ──────────────────────────────────────────────
 // 채널 연결: 구글 블로그(Blogger) OAuth
 // ──────────────────────────────────────────────
-const GOOGLE_REDIRECT = location.origin + location.pathname.replace(/콘솔\/[^/]+$/, '').replace(/[^/]+$/, '');
-// GitHub Pages: https://hanbyeolsystem.github.io/hanbyul-autopost/ (root)
-// 로컬: file:// 같은 환경에선 동작 안 함 — GitHub Pages에서만 OAuth 사용
+// Google OAuth 등록된 redirect URI 와 정확히 같아야 함 → 항상 GitHub Pages root 로 정규화.
+// (콘솔이 /콘솔/... 서브경로에 있어도 한 단계 위 root 로 돌아감. index.html 이 ?code 쿼리를 콘솔로 재전달)
+const GOOGLE_REDIRECT = (function(){
+  const p = location.pathname;
+  const m = p.match(/^(.*?\/hanbyul-autopost\/)/);
+  if (m) return location.origin + m[1];
+  // hanbyul-autopost 경로가 아닌 환경(로컬 등) — 현재 디렉토리로 폴백
+  return location.origin + p.replace(/[^/]+$/, '');
+})();
 
 const googleStatusEl   = document.getElementById('googleStatus');
 const googleHintEl     = document.getElementById('googleHint');
