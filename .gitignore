@@ -10,3 +10,7 @@ notes.local.*
 
 # 의존성/캐시
 node_modules/
+
+# Supabase CLI 캐시
+supabase/.temp/
+supabase/.branches/
