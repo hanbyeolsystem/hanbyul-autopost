@@ -1,6 +1,5 @@
-// 한별시스템 AI 발행 백엔드 (Supabase Edge Function 버전)
+// 한별시스템 AI 발행 백엔드 (Supabase Edge Function)
 // ─────────────────────────────────────────────
-// 원본: AI백엔드/server.js (Node) → Deno 런타임으로 이식.
 // 키는 Supabase Secret(ANTHROPIC_API_KEY)에서만 읽고, 브라우저에는 노출되지 않음.
 //
 // 라우팅 (function 슬러그 기준):
@@ -13,6 +12,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
 const ANTHROPIC_KEY = Deno.env.get("ANTHROPIC_API_KEY") || "";
+const OPENAI_KEY    = Deno.env.get("OPENAI_API_KEY") || "";
 const ALLOW_ORIGIN  = Deno.env.get("ALLOW_ORIGIN") || "*";
 
 const COMPANY = {
@@ -185,6 +185,18 @@ async function analyzeImages(images: { media_type?: string; data: string }[]) {
   };
 }
 
+async function generateImage(promptText: string) {
+  if (!OPENAI_KEY) throw new Error("AI 그림 생성은 OPENAI_API_KEY 시크릿이 필요합니다.");
+  const r = await fetch("https://api.openai.com/v1/images/generations", {
+    method: "POST",
+    headers: { "content-type": "application/json", "authorization": "Bearer " + OPENAI_KEY },
+    body: JSON.stringify({ model: "dall-e-3", prompt: promptText, n: 1, size: "1024x1024" }),
+  });
+  if (!r.ok) throw new Error("Image " + r.status + ": " + (await r.text()).slice(0, 200));
+  const d = await r.json();
+  return { url: d.data[0].url, usage: { usd: 0.04 } };
+}
+
 function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": ALLOW_ORIGIN,
@@ -213,7 +225,7 @@ Deno.serve(async (req: Request) => {
         ok: true,
         ai: ANTHROPIC_KEY ? "anthropic" : "none",
         vision: !!ANTHROPIC_KEY,
-        imagegen: false,
+        imagegen: !!OPENAI_KEY,
         videogen: false,
         channels: Object.keys(CHANNEL_AGENTS),
       });
@@ -231,7 +243,13 @@ Deno.serve(async (req: Request) => {
       return jsonResponse(200, { ok: true, desc: out.desc, usage: out.usage });
     }
 
-    return jsonResponse(404, { ok: false, error: "Not found. 사용: GET /health, POST /generate, /analyze-image" });
+    if (req.method === "POST" && sub === "/generate-image") {
+      const p = await req.json() as { prompt?: string };
+      const out = await generateImage(p.prompt || "한별시스템 사무기기 관련 깔끔한 일러스트");
+      return jsonResponse(200, { ok: true, url: out.url, usage: out.usage });
+    }
+
+    return jsonResponse(404, { ok: false, error: "Not found. 사용: GET /health, POST /generate, /analyze-image, /generate-image" });
   } catch (e) {
     return jsonResponse(500, { ok: false, error: (e as Error).message || String(e) });
   }

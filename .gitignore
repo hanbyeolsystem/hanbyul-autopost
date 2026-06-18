@@ -1,6 +1,4 @@
-# 🔒 API 키 — 절대 외부 공유/업로드 금지
-AI백엔드/key.txt
-**/key.txt
+# API 키 / 시크릿
 *.key
 .env
 

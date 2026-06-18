@@ -586,7 +586,7 @@ document.getElementById('gen').onclick = async ()=>{
   if(!selected.length){ alert('채널을 1개 이상 선택해 주세요.'); return; }
 
   const typing = document.getElementById('typing');
-  typing.textContent = apiBase ? 'NAS의 AI 엔진이 채널별 글을 작성 중…' : '에이전트 공식으로 채널별 글을 작성 중…';
+  typing.textContent = apiBase ? 'AI 백엔드가 채널별 글을 작성 중…' : '에이전트 공식으로 채널별 글을 작성 중…';
   typing.style.display='block';
   document.getElementById('empty').style.display='none';
   const cards = document.getElementById('cards');
@@ -907,7 +907,7 @@ function openSchedule(ch, text){
   document.getElementById('modalTitle').textContent = ch.name + (auto?' 예약 발행':' 예약 알림');
   document.getElementById('modalBody').innerHTML = `
     <div style="margin-bottom:12px;color:var(--sub);font-size:13px">
-      ${auto ? 'API 자동 발행 채널입니다. 지정 시간에 자동 발행됩니다.(NAS 연동 시)'
+      ${auto ? 'API 자동 발행 채널입니다. 지정 시간에 자동 발행됩니다.(채널 API 연동 시)'
              : '이 채널은 직접 발행이 안전합니다. 지정 시간에 \"발행하세요\" 알림으로 대기열에 등록됩니다.'}
     </div>
     <label style="font-size:13px">발행 일시</label>
@@ -1019,11 +1019,11 @@ function makePost(ch, text, status){
   };
 }
 
-// 바로발행 (실제 채널 API 자동발행은 NAS 연동 시. 지금은 '발행 처리'로 게시판에 기록)
+// 바로발행 (실제 채널 API 자동발행은 채널별 API 연동 시. 지금은 '발행 처리'로 게시판에 기록)
 function publishNow(ch, text){
   addToBoard(ch.id, makePost(ch, text, '발행'));
   saveHistory(ch.id, text);
-  alert(ch.name+' 바로발행 처리되었습니다. (채널 게시판에 저장됨)\n※ 실제 채널 자동 업로드는 NAS+채널 API 연동 후 작동합니다.');
+  alert(ch.name+' 바로발행 처리되었습니다. (채널 게시판에 저장됨)\n※ 실제 채널 자동 업로드는 채널별 API 연동 후 작동합니다.');
 }
 
 // ── 상단 전체 처리 버튼 ──

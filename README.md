@@ -7,40 +7,37 @@
 
 ```
 .
-├── 콘솔/                      # 발행 콘솔 (단일 HTML, 브라우저로 열기)
+├── 콘솔/                                       # 발행 콘솔 (단일 HTML)
 │   └── hanbyul-autopost-dashboard.html
-├── AI백엔드/                  # 키를 안전하게 숨기는 AI 게이트웨이 (Node)
-│   ├── server.js             # Claude(글·사진분석) + OpenAI(그림) + Higgsfield(영상)
-│   ├── 실행.bat              # 더블클릭 실행
-│   ├── Dockerfile / docker-compose.yml   # 시놀로지 NAS 배포용
-│   └── (key.txt)            # 🔒 API 키 — git에 올라가지 않음(.gitignore)
-├── 채널에이전트/             # 6채널 글쓰기 규칙서 + AI 프롬프트 + 경쟁사 분석
-└── 가이드/                   # 설치·배포 가이드
+├── supabase/functions/hanbyul-autopost-ai/     # 클라우드 AI 백엔드 (Deno Edge Function)
+│   └── index.ts                                # Claude(글+사진분석) · DALL·E(그림)
+├── 채널에이전트/                                # 6채널 글쓰기 규칙서 + 경쟁사 분석
+├── index.html                                  # GitHub Pages 진입점 (콘솔로 redirect)
+└── .nojekyll
 ```
+
+GitHub Pages: https://hanbyeolsystem.github.io/hanbyul-autopost/
 
 ## 핵심 기능
 
 - **AI 글 생성** — 채널별 맞춤 글 (Claude). "파는 글"이 아니라 "돕는 글" 톤.
 - **사진 분석** — 업로드 사진을 Claude Vision으로 분석해 글-사진 일치 보장.
-- **AI 그림/영상** — DALL·E 그림, Higgsfield 영상 (선택).
+- **AI 그림** — DALL·E (선택, OPENAI_API_KEY 등록 시).
 - **실제 발행 모습 미리보기** — 채널별 레이아웃 + 사진 자리에 실제 이미지.
-- **예약/바로발행 + 채널별 게시판 + 성과 분석**(노출·클릭).
+- **예약/바로발행 + 채널별 게시판 + 성과 분석**.
 
-## 빠른 시작
+## 백엔드 (Supabase Edge Function)
 
-1. `AI백엔드/key.txt`에 키를 한 줄씩 넣기:
-   ```
-   sk-ant-...      # Claude (필수: 글+사진분석)
-   sk-...          # OpenAI (선택: 그림)
-   hf:힉스필드키    # Higgsfield (선택: 영상)
-   ```
-2. `AI백엔드/실행.bat` 더블클릭 → 서버 켜기
-3. `콘솔/hanbyul-autopost-dashboard.html`을 브라우저로 열기
-4. 소재 입력 → ⚡생성
-
-자세한 내용은 `가이드/배포가이드.md` 참고.
+- 함수명: `hanbyul-autopost-ai` (Supabase 프로젝트 `asms-pacai` 안에 함께 거주)
+- 라우팅:
+  - `GET  /functions/v1/hanbyul-autopost-ai/health`
+  - `POST /functions/v1/hanbyul-autopost-ai/generate`
+  - `POST /functions/v1/hanbyul-autopost-ai/analyze-image`
+  - `POST /functions/v1/hanbyul-autopost-ai/generate-image` (OPENAI_API_KEY 필요)
+- 시크릿: `ANTHROPIC_API_KEY` (필수), `OPENAI_API_KEY` (선택)
+  → Supabase Dashboard → Edge Functions → Secrets 에서 등록.
 
 ## 보안
 
-- API 키(`key.txt`)는 **절대 저장소에 올리지 않습니다** (`.gitignore`로 제외).
-- 키는 백엔드 서버에만 존재하며, 브라우저(콘솔)에 노출되지 않습니다.
+- 모든 API 키는 Supabase Secret에만 존재. 브라우저(콘솔)에 노출되지 않음.
+- 콘솔의 anon key는 공개 키 — 실제 게이트는 Edge Function 의 verify_jwt + RLS.
