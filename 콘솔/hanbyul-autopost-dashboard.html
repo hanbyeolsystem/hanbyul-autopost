@@ -1056,8 +1056,20 @@ function splitTitleAndBody(text){
   return { title: title || '한별시스템 새 글', body };
 }
 
-// 바로발행 — 구글 블로그는 실제 API로, 나머지는 게시판 기록
+// 바로발행 — 채널별 분기. 구글 블로그는 실제 API, 유튜브는 복사+업로드창 열기, 나머지는 게시판 기록
 async function publishNow(ch, text){
+  if (ch.id === 'youtube') {
+    try {
+      await navigator.clipboard.writeText(text);
+      addToBoard(ch.id, makePost(ch, text, '발행', { url: 'https://studio.youtube.com/' }));
+      saveHistory(ch.id, text);
+      window.open('https://studio.youtube.com/', '_blank');
+      alert('✅ 유튜브 글이 클립보드에 복사됐어요.\n새 탭에서 열린 YouTube Studio 에서 영상 업로드 후 제목/설명/태그에 붙여넣어 주세요.\n(영상 자동 업로드는 다음 단계에서 연결합니다.)');
+    } catch (e) {
+      alert('클립보드 복사 실패: ' + e.message);
+    }
+    return;
+  }
   if (ch.id === 'google') {
     const apiBase = document.getElementById('apiBase').value.trim();
     if (!apiBase) { alert('AI 백엔드 주소가 비어 있습니다.'); return; }
