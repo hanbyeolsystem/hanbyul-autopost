@@ -47,13 +47,14 @@ const CHANNEL_AGENTS: Record<string, string> = {
   naver: `[채널] 네이버 블로그 — 검색 유입 최대화 + B2B 신뢰.
 - 제목: 지역+핵심키워드를 맨 앞에. 글유형에 맞는 공식(후기/가이드/사례). 모델명 정확히.
 - 본문: '안녕하세요, ${COMPANY.name}입니다.'로 시작 → 고객 어려움 공감 → 함께 찾은 해결 → 결과의 안심.
-- [📷 사진 1], [📷 사진 2] 자리 2개 이상 표시.
-- 분량 1,200~1,800자. 핵심 키워드 3~5회 자연 반복.
+- 분량 3,800~4,200자 (한글 기준, 공백 포함). 길이를 채우기 위해 같은 말을 반복하지 말고 구체적 사례·수치·체크리스트·Q&A·비교표 등으로 자연스럽게 확장.
+- 핵심 키워드 5~8회 자연 반복.
 - 끝에 오시는 길/연락처(도움 톤) + 해시태그 10~15개(#지역+키워드, #키워드, #모델명, #${COMPANY.name}).`,
 
   google: `[채널] 구글 블로그(Blogger) — 구글 SEO + 영문 병기.
 - 제목: "[지역] [키워드] — [고객문제], 함께 해결한 이야기 | ${COMPANY.name}". 영문 모델/브랜드 병기(Synology, Kyocera 등).
 - 소제목(##, ###)으로 구조화. 본문은 고객 어려움→공감→해결→돕는 톤 회사 소개.
+- 분량 3,800~4,200자 (한글 기준, 공백 포함). 채우기 위한 반복 금지 — 소제목별로 구체적 사례·비교·체크리스트·Q&A·기술 배경 설명으로 자연스럽게 확장.
 - 끝에 "Keywords:" 줄로 한글+영문 키워드 나열. 해시태그 포함.`,
 
   youtube: `[채널] 유튜브 — 제목/설명/태그.
@@ -95,6 +96,7 @@ interface GenInput {
   solution?: string;
   postType?: string;
   imageDesc?: string;
+  imageCount?: number;
   history?: string[];
 }
 
@@ -107,6 +109,26 @@ function buildPrompt(p: GenInput): string {
 [첨부 사진 분석 결과]
 ${p.imageDesc}
 ★ 매우 중요: 글의 내용은 위 사진에 실제로 보이는 것과 반드시 일치해야 합니다. 사진에 없는 장비·모델·상황을 지어내지 마세요. 글과 사진이 어긋나면 신뢰가 깨집니다.` : "";
+
+  // 사진 첨부 개수 기반 마커 배치 지침. 채널별 분량(블로그 4000자)이 길어서 골고루 분산이 중요.
+  const photoMarkerBlock = (() => {
+    const n = p.imageCount ?? 0;
+    if (n <= 0) {
+      return `
+[사진 마커]
+- 첨부된 사진이 없습니다. 본문에 [📷 사진 …] 마커를 절대 넣지 마세요.`;
+    }
+    const examples = Array.from({ length: n }, (_, i) =>
+      `[📷 사진 ${i + 1} — (이 자리에 들어갈 사진의 내용을 한 줄로 적기, 예: '설치 완료된 모습', '기존 장비 점검 중' 등)]`
+    ).join("\n");
+    return `
+[사진 마커 — 절대 규칙]
+- 사용자가 사진을 정확히 ${n}장 첨부했습니다. 본문에 [📷 사진 1] 부터 [📷 사진 ${n}] 까지 마커를 반드시 ${n}개 모두 넣으세요. ${n}개보다 적게 넣으면 안 되고, ${n}개보다 많이 넣어도 안 됩니다.
+- ${n}개의 마커는 본문 중간중간에 골고루 분산 배치하세요. 글 시작이나 끝에 몰리지 않게, 단락과 단락 사이에 자연스럽게 끼우세요.
+- 각 마커는 한 줄 통째로 쓰고(앞뒤 빈 줄로 분리), 캡션은 [📷 사진 N — ...] 형태로 짧게 적으세요.
+- 마커 형식 예시:
+${examples}`;
+  })();
 
   const histBlock = (p.history && p.history.length) ? `
 [참고: 이 채널의 과거 발행 사례 (톤·구성을 참고하되 내용은 새로 작성)]
@@ -122,6 +144,7 @@ ${agent}
 
 ${typeGuide}
 ${imageBlock}
+${photoMarkerBlock}
 ${histBlock}
 
 [이번 글의 입력값]
@@ -147,7 +170,7 @@ async function callClaude(prompt: string) {
     },
     body: JSON.stringify({
       model: "claude-sonnet-4-5",
-      max_tokens: 2000,
+      max_tokens: 8000,
       messages: [{ role: "user", content: prompt }],
     }),
   });

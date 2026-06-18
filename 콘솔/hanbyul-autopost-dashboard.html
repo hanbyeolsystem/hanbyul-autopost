@@ -639,7 +639,8 @@ document.getElementById('gen').onclick = async ()=>{
   cards.innerHTML='';
   drafts = {};
 
-  const payloadBase = {seed, kw, tone, region, model, service, pain, solution, postType, imageDesc: imageDescText};
+  const imageCount = media.filter(f=>f.type.startsWith('image/')).length;
+  const payloadBase = {seed, kw, tone, region, model, service, pain, solution, postType, imageDesc: imageDescText, imageCount};
 
   // ① 각 채널 카드(껍데기)를 먼저 만들고, 본문만 '작성 중'으로 표시
   const cardMap = {};
