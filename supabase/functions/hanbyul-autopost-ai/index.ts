@@ -214,16 +214,44 @@ function escHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-// 평문 본문 → Blogger용 간단 HTML. [📷 사진 N — ...] 마커는 placeholder 박스로.
-function textToBloggerHtml(text: string): string {
+// 평문 본문 → Blogger용 간단 HTML.
+// images 가 있으면 [📷 사진 N — ...] 마커 자리에 순서대로 <img> data: URL 인라인 삽입.
+// 마커보다 사진이 많으면 본문 끝에 추가. 마커가 많으면 남은 자리는 placeholder 박스 유지.
+function textToBloggerHtml(
+  text: string,
+  images: { media_type: string; data: string }[] = [],
+): string {
   const photoMarker = /\[📷[^\]]*\]/g;
-  const replaced = text.replace(photoMarker, (m) =>
-    `\n<!--PHOTO-->${m.replace(/[\[\]]/g, "")}<!--/PHOTO-->\n`
-  );
-  const paragraphs = replaced.split(/\n{2,}/);
+  let imgIdx = 0;
+  const replaced = text.replace(photoMarker, (m) => {
+    const caption = m.replace(/[\[\]]/g, "").trim();
+    if (imgIdx < images.length) {
+      const im = images[imgIdx++];
+      // 캡션에 || 가 섞일 일은 없지만 안전하게 인코딩
+      const safeCaption = caption.replace(/\|/g, "│");
+      return `\n<!--IMG-->data:${im.media_type};base64,${im.data}||${safeCaption}<!--/IMG-->\n`;
+    }
+    return `\n<!--PHOTO-->${caption}<!--/PHOTO-->\n`;
+  });
+  // 마커보다 사진이 많으면 끝에 "현장 사진" 으로 덧붙임
+  let withExtras = replaced;
+  if (imgIdx < images.length) {
+    const extras = images.slice(imgIdx).map((im) =>
+      `\n\n<!--IMG-->data:${im.media_type};base64,${im.data}||현장 사진<!--/IMG-->\n`
+    ).join("");
+    withExtras = replaced + extras;
+  }
+  const paragraphs = withExtras.split(/\n{2,}/);
   return paragraphs.map((para) => {
     const trimmed = para.trim();
     if (!trimmed) return "";
+    if (trimmed.startsWith("<!--IMG-->")) {
+      const inner = trimmed.replace(/<!--\/?IMG-->/g, "").trim();
+      const sep = inner.indexOf("||");
+      const src = sep >= 0 ? inner.slice(0, sep) : inner;
+      const caption = sep >= 0 ? inner.slice(sep + 2) : "";
+      return `<div style="margin:14px 0;text-align:center"><img src="${src}" style="max-width:100%;height:auto;border-radius:8px"/>${caption ? `<div style="font-size:12px;color:#888;margin-top:6px">${escHtml(caption)}</div>` : ""}</div>`;
+    }
     if (trimmed.startsWith("<!--PHOTO-->")) {
       const caption = trimmed.replace(/<!--\/?PHOTO-->/g, "").trim();
       return `<div style="border:2px dashed #ccc;border-radius:10px;padding:24px 12px;text-align:center;color:#aaa;margin:14px 0;font-size:13px">📷 ${escHtml(caption)}</div>`;
@@ -340,13 +368,14 @@ async function publishGoogle(p: {
   labels?: string[];
   blogId?: string;
   isDraft?: boolean;
+  images?: { media_type: string; data: string }[];
 }) {
   const blogId = p.blogId || GOOGLE_BLOG_ID;
   if (!blogId) throw new Error("blogId 또는 GOOGLE_BLOG_ID 시크릿이 필요합니다.");
   const accessToken = await googleAccessToken();
 
   const isHtml = /<\w+[^>]*>/.test(p.content);
-  const html = isHtml ? p.content : textToBloggerHtml(p.content);
+  const html = isHtml ? p.content : textToBloggerHtml(p.content, p.images || []);
 
   const body = {
     kind: "blogger#post",
@@ -478,6 +507,7 @@ Deno.serve(async (req: Request) => {
         labels?: string[];
         blogId?: string;
         isDraft?: boolean;
+        images?: { media_type: string; data: string }[];
       };
       if (!p.title || !p.content) {
         return jsonResponse(400, { ok: false, error: "title, content 필요" });
@@ -488,6 +518,7 @@ Deno.serve(async (req: Request) => {
         labels: p.labels,
         blogId: p.blogId,
         isDraft: p.isDraft,
+        images: p.images,
       });
       return jsonResponse(200, { ok: true, ...out });
     }

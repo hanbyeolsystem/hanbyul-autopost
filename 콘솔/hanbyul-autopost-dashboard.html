@@ -376,6 +376,34 @@ function fileToB64(file){
   });
 }
 
+// 이미지 파일 → 리사이즈된 JPEG base64. Blogger 인라인 삽입용(원본은 너무 큼).
+function fileToResizedB64(file, maxW, quality){
+  maxW = maxW || 1200;
+  quality = quality || 0.85;
+  return new Promise((res, rej)=>{
+    if(!file.type.startsWith('image/')) return rej(new Error('이미지가 아닙니다'));
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = ()=>{
+      try{
+        const ratio = Math.min(1, maxW / img.naturalWidth);
+        const w = Math.round(img.naturalWidth * ratio);
+        const h = Math.round(img.naturalHeight * ratio);
+        const cv = document.createElement('canvas');
+        cv.width = w; cv.height = h;
+        cv.getContext('2d').drawImage(img, 0, 0, w, h);
+        URL.revokeObjectURL(url);
+        const dataUrl = cv.toDataURL('image/jpeg', quality);
+        const m = /^data:([^;]+);base64,(.+)$/.exec(dataUrl);
+        if(!m) return rej(new Error('base64 추출 실패'));
+        res({ media_type: m[1], data: m[2] });
+      }catch(e){ URL.revokeObjectURL(url); rej(e); }
+    };
+    img.onerror = ()=>{ URL.revokeObjectURL(url); rej(new Error('이미지 로드 실패')); };
+    img.src = url;
+  });
+}
+
 // ── 사진 분석 (Claude Vision) ──
 document.getElementById('analyzeBtn').onclick = async ()=>{
   const apiBase = document.getElementById('apiBase').value.trim();
@@ -1169,10 +1197,20 @@ async function publishNow(ch, text){
     if (!apiBase) { alert('AI 백엔드 주소가 비어 있습니다.'); return; }
     const blogId = (localStorage.getItem('hanbyul_google_blog_id')||'').trim();
     const { title, body } = splitTitleAndBody(text);
+    // 첨부 사진 → 리사이즈된 base64 (최대 8장). [📷 사진 N — ...] 마커 자리에 인라인 삽입.
+    const imgFiles = media.filter(f => f.type.startsWith('image/')).slice(0, 8);
+    let images = [];
+    if (imgFiles.length) {
+      try {
+        images = await Promise.all(imgFiles.map(f => fileToResizedB64(f)));
+      } catch (e) {
+        if (!confirm('사진 인코딩 실패: ' + (e.message || e) + '\n사진 없이 발행할까요?')) return;
+      }
+    }
     try {
       const r = await aiFetch(apiBase, '/publish/google', {
         method: 'POST',
-        body: JSON.stringify({ title, content: body, blogId: blogId || undefined })
+        body: JSON.stringify({ title, content: body, blogId: blogId || undefined, images })
       });
       const d = await r.json().catch(()=>({ok:false,error:'응답 파싱 실패'}));
       if (!r.ok || !d.ok) throw new Error(d.error || ('HTTP '+r.status));
