@@ -266,6 +266,7 @@ let media = [];
 let drafts = {};
 let queue = [];
 let imageDescText = '';   // 사진 분석 결과 (생성 시 백엔드로 전달)
+let ytVideoFiles = {};    // 유튜브 카드용 영상 파일 (File 객체)
 
 // ── 선택용 데이터 저장소 (증상/해결/서비스/모델) — localStorage CRUD ──
 const DEFAULTS = {
@@ -696,11 +697,15 @@ function fillCard(card, ch, text, usage){
       <textarea id="ta-${ch.id}">${escapeHtml(text)}</textarea>
       <div style="font-size:11px;color:var(--sub);margin-top:6px" id="cnt-${ch.id}"></div>`;
   // 예약: 자동채널은 '예약 발행', 반자동은 '예약 알림'
+  const ytAttach = (ch.id === 'youtube')
+    ? `<button class="mini" data-act="ytattach">🎞 영상 첨부 <span data-ytinfo style="font-size:11px;color:var(--sub)">${ytVideoFiles[ch.id] ? '(첨부됨: '+escapeHtml(ytVideoFiles[ch.id].name.slice(0,18))+')' : ''}</span></button>`
+    : '';
   foot.innerHTML = `
       <button class="mini" data-act="regen">↻ 다시쓰기</button>
       <button class="mini" data-act="preview">👁 미리보기</button>
       <button class="mini" data-act="image">🎨 그림</button>
       <button class="mini" data-act="video">🎬 영상</button>
+      ${ytAttach}
       <button class="mini" data-act="copy">⧉ 복사</button>
       <button class="mini" data-act="schedule">🗓 자동발행(예약)</button>
       <button class="mini pub" data-act="publish">⚡ 바로발행</button>`;
@@ -729,6 +734,24 @@ function fillCard(card, ch, text, usage){
   foot.querySelector('[data-act=preview]').onclick=()=> openPreview(ch, ta.value);
   foot.querySelector('[data-act=image]').onclick=()=> openImageGen(ch, ta.value);
   foot.querySelector('[data-act=video]').onclick=()=> openVideoGen(ch, ta.value);
+
+  // 유튜브 영상 첨부 버튼
+  const ytBtn = foot.querySelector('[data-act=ytattach]');
+  if (ytBtn) {
+    ytBtn.onclick = ()=>{
+      const inp = document.createElement('input');
+      inp.type = 'file';
+      inp.accept = 'video/*';
+      inp.onchange = e=>{
+        const f = e.target.files && e.target.files[0];
+        if (!f) return;
+        ytVideoFiles[ch.id] = f;
+        const info = ytBtn.querySelector('[data-ytinfo]');
+        if (info) info.textContent = '(첨부됨: ' + f.name.slice(0,18) + ' · ' + (f.size/1024/1024).toFixed(1) + 'MB)';
+      };
+      inp.click();
+    };
+  }
   foot.querySelector('[data-act=copy]').onclick=()=>{
     navigator.clipboard.writeText(ta.value);
     const b=foot.querySelector('[data-act=copy]');b.textContent='✓ 복사됨';
@@ -1036,6 +1059,30 @@ function makePost(ch, text, status, extra){
   }, extra || {});
 }
 
+// 유튜브 글에서 제목/설명/태그 휴리스틱 분리 (AI 글 양식이 매번 다르므로 보수적)
+function parseYouTubeContent(text){
+  const lines = (text||'').split('\n');
+  let title = '';
+  // "제목:" 또는 "🎬 제목:" 줄 찾기
+  for (const line of lines) {
+    const m = line.match(/(?:🎬\s*)?제목\s*[:：]\s*(.+)/);
+    if (m) { title = m[1].replace(/^[\d.)\s가-힣]*[)\.\:]?\s*/, '').trim(); break; }
+  }
+  if (!title) {
+    const first = lines.find(l => l.trim() && !/^[#📷🎬📄]/.test(l.trim()));
+    title = (first || '한별시스템 영상').replace(/^[#\s]+/, '').trim();
+  }
+  // 해시태그 → 태그 배열 (#xxx 패턴)
+  const tagSet = new Set();
+  for (const m of text.matchAll(/#([^\s#,]+)/g)) tagSet.add(m[1]);
+  const tags = Array.from(tagSet).slice(0, 30);
+  return {
+    title: title.slice(0, 100),
+    description: text,
+    tags,
+  };
+}
+
 // 글 본문에서 제목 1줄과 나머지를 분리. 채널별 양식이 달라 보수적으로 처리.
 function splitTitleAndBody(text){
   const lines = (text||'').split('\n');
@@ -1059,14 +1106,61 @@ function splitTitleAndBody(text){
 // 바로발행 — 채널별 분기. 구글 블로그는 실제 API, 유튜브는 복사+업로드창 열기, 나머지는 게시판 기록
 async function publishNow(ch, text){
   if (ch.id === 'youtube') {
+    const videoFile = ytVideoFiles[ch.id];
+    if (!videoFile) {
+      // A 흐름: 영상 미첨부 → 글 복사 + YouTube Studio 열기
+      try {
+        await navigator.clipboard.writeText(text);
+        addToBoard(ch.id, makePost(ch, text, '발행', { url: 'https://studio.youtube.com/' }));
+        saveHistory(ch.id, text);
+        window.open('https://studio.youtube.com/', '_blank');
+        alert('✅ 유튜브 글이 클립보드에 복사됐어요.\n영상도 자동 업로드하려면 카드 하단 "🎞 영상 첨부"로 영상을 골라주세요.');
+      } catch (e) {
+        alert('클립보드 복사 실패: ' + e.message);
+      }
+      return;
+    }
+    // B 흐름: 영상 자동 업로드
+    const apiBase = document.getElementById('apiBase').value.trim();
+    if (!apiBase) { alert('AI 백엔드 주소가 비어 있습니다.'); return; }
+    const meta = parseYouTubeContent(text);
+    const ok = confirm(`유튜브에 다음 영상으로 업로드합니다.\n\n제목: ${meta.title}\n파일: ${videoFile.name} (${(videoFile.size/1024/1024).toFixed(1)}MB)\n공개: 공개\n\n계속할까요?`);
+    if (!ok) return;
     try {
-      await navigator.clipboard.writeText(text);
-      addToBoard(ch.id, makePost(ch, text, '발행', { url: 'https://studio.youtube.com/' }));
+      // 1) Edge Function 에 resumable session 요청
+      const r = await aiFetch(apiBase, '/youtube/start-upload', {
+        method: 'POST',
+        body: JSON.stringify({
+          title: meta.title,
+          description: meta.description,
+          tags: meta.tags,
+          sizeBytes: videoFile.size,
+          mimeType: videoFile.type || 'video/mp4',
+          privacy: 'public',
+        })
+      });
+      const d = await r.json().catch(()=>({ok:false, error:'응답 파싱 실패'}));
+      if (!r.ok || !d.ok || !d.uploadUrl) throw new Error(d.error || ('HTTP '+r.status));
+
+      // 2) upload URL 에 영상 바이너리 PUT — 브라우저 → YouTube 직접
+      const uploadR = await fetch(d.uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': videoFile.type || 'video/mp4' },
+        body: videoFile,
+      });
+      if (!uploadR.ok) throw new Error('YouTube upload HTTP ' + uploadR.status);
+      const uploadResp = await uploadR.json();
+      const videoId = uploadResp.id;
+      if (!videoId) throw new Error('영상 ID를 못 받았습니다: ' + JSON.stringify(uploadResp).slice(0,200));
+
+      const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+      addToBoard(ch.id, makePost(ch, text, '발행', { url: videoUrl }));
       saveHistory(ch.id, text);
-      window.open('https://studio.youtube.com/', '_blank');
-      alert('✅ 유튜브 글이 클립보드에 복사됐어요.\n새 탭에서 열린 YouTube Studio 에서 영상 업로드 후 제목/설명/태그에 붙여넣어 주세요.\n(영상 자동 업로드는 다음 단계에서 연결합니다.)');
+      delete ytVideoFiles[ch.id];   // 한 번 쓴 영상은 비움
+      alert('✅ 유튜브에 영상이 업로드되었습니다.\n주소: ' + videoUrl);
+      window.open(videoUrl, '_blank');
     } catch (e) {
-      alert('클립보드 복사 실패: ' + e.message);
+      alert('❌ 유튜브 영상 업로드 실패\n' + (e.message || e) + '\n\n해결 단서:\n- 채널 연결 박스에서 "구글 계정으로 연결" 을 한 번 더 눌러 YouTube 권한도 받았는지\n- Google Cloud Console 에서 YouTube Data API v3 가 활성화돼 있는지');
     }
     return;
   }
@@ -1283,7 +1377,12 @@ googleConnectBtn.onclick = ()=>{
     client_id: clientId,
     redirect_uri: GOOGLE_REDIRECT,
     response_type: 'code',
-    scope: 'https://www.googleapis.com/auth/blogger',
+    // Blogger(글 발행) + YouTube(영상 업로드) 권한을 한 번에 받는다.
+    scope: [
+      'https://www.googleapis.com/auth/blogger',
+      'https://www.googleapis.com/auth/youtube.upload',
+      'https://www.googleapis.com/auth/youtube',
+    ].join(' '),
     access_type: 'offline',
     prompt: 'consent',           // refresh_token 매번 발급되도록
     state,

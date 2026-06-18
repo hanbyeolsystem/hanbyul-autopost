@@ -287,6 +287,53 @@ async function googleConnect(code: string, redirect_uri: string) {
   return { refresh_token: d.refresh_token as string, blogs };
 }
 
+// YouTube: resumable upload session 만 만들고 upload URL 을 콘솔에 돌려준다.
+// 영상 바이너리는 콘솔 → YouTube 로 직접 PUT 해서 Edge Function body 한계를 피한다.
+async function youtubeStartUpload(p: {
+  title: string;
+  description: string;
+  tags?: string[];
+  categoryId?: string;
+  privacy?: "public" | "unlisted" | "private";
+  sizeBytes: number;
+  mimeType: string;
+}) {
+  const accessToken = await googleAccessToken();
+  const meta = {
+    snippet: {
+      title: (p.title || "").slice(0, 100),                 // YouTube 제한 100자
+      description: (p.description || "").slice(0, 5000),    // 5000자
+      tags: (p.tags || []).slice(0, 30),
+      categoryId: p.categoryId || "22",                     // People & Blogs
+      defaultLanguage: "ko",
+    },
+    status: {
+      privacyStatus: p.privacy || "public",
+      selfDeclaredMadeForKids: false,
+      embeddable: true,
+      license: "youtube",
+    },
+  };
+
+  const r = await fetch(
+    "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status",
+    {
+      method: "POST",
+      headers: {
+        "Authorization": "Bearer " + accessToken,
+        "Content-Type": "application/json; charset=UTF-8",
+        "X-Upload-Content-Length": String(p.sizeBytes),
+        "X-Upload-Content-Type": p.mimeType,
+      },
+      body: JSON.stringify(meta),
+    },
+  );
+  if (!r.ok) throw new Error("YouTube start upload " + r.status + ": " + (await r.text()).slice(0, 300));
+  const uploadUrl = r.headers.get("Location");
+  if (!uploadUrl) throw new Error("YouTube upload Location 헤더가 응답에 없습니다.");
+  return { uploadUrl };
+}
+
 async function publishGoogle(p: {
   title: string;
   content: string;
@@ -363,6 +410,11 @@ Deno.serve(async (req: Request) => {
             blog_id_set: !!GOOGLE_BLOG_ID,
             client_id_hint: GOOGLE_CLIENT_ID ? GOOGLE_CLIENT_ID.slice(0, 12) + "…" : "",
           },
+          youtube: {
+            // 같은 GOOGLE_REFRESH_TOKEN 을 사용. scope 에 youtube.upload 가 포함돼야 함.
+            // configured 는 클라이언트가 있고 refresh_token 도 있는지 정도만.
+            configured: !!(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET && GOOGLE_REFRESH_TOKEN),
+          },
         },
       });
     }
@@ -391,6 +443,31 @@ Deno.serve(async (req: Request) => {
         return jsonResponse(400, { ok: false, error: "code, redirect_uri 필요" });
       }
       const out = await googleConnect(p.code, p.redirect_uri);
+      return jsonResponse(200, { ok: true, ...out });
+    }
+
+    if (req.method === "POST" && sub === "/youtube/start-upload") {
+      const p = await req.json() as {
+        title?: string;
+        description?: string;
+        tags?: string[];
+        categoryId?: string;
+        privacy?: "public" | "unlisted" | "private";
+        sizeBytes?: number;
+        mimeType?: string;
+      };
+      if (!p.title || !p.sizeBytes || !p.mimeType) {
+        return jsonResponse(400, { ok: false, error: "title, sizeBytes, mimeType 필요" });
+      }
+      const out = await youtubeStartUpload({
+        title: p.title,
+        description: p.description || "",
+        tags: p.tags,
+        categoryId: p.categoryId,
+        privacy: p.privacy,
+        sizeBytes: p.sizeBytes,
+        mimeType: p.mimeType,
+      });
       return jsonResponse(200, { ok: true, ...out });
     }
 
