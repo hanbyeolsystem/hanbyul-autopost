@@ -24,6 +24,10 @@ const GOOGLE_CLIENT_SECRET = Deno.env.get("GOOGLE_CLIENT_SECRET") || "";
 const GOOGLE_REFRESH_TOKEN = Deno.env.get("GOOGLE_REFRESH_TOKEN") || "";
 const GOOGLE_BLOG_ID       = Deno.env.get("GOOGLE_BLOG_ID") || "";
 
+// Supabase (대기열 DB 접근용 — Edge Function 에 자동 주입되는 시크릿)
+const SUPABASE_URL  = Deno.env.get("SUPABASE_URL") || "";
+const SERVICE_KEY   = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+
 const COMPANY = {
   name: "한별시스템",
   addr: "대구 달서구 문화회관11안길 22-7 1층",
@@ -424,6 +428,102 @@ async function publishGoogle(p: {
   return { id: d.id as string, url: d.url as string, published: d.published as string };
 }
 
+// ──────────────────────────────────────────────
+// 대기열 파이프라인 (Supabase DB, service_role)
+//   소재 → AI 채널별 생성 → post_queue 적재(pending) → 검토/승인 → 발행(published)
+// ──────────────────────────────────────────────
+
+interface QueueGenInput {
+  topic: string;
+  raw_context?: string;
+  region?: string;
+  post_type?: string;        // review|guide|case
+  image_desc?: string;
+  image_count?: number;
+  kw?: string;
+  model?: string;
+  service?: string;
+  pain?: string;
+  solution?: string;
+  channels?: string[];       // 비우면 6채널 전부
+}
+
+// PostgREST 호출 (service_role → RLS 우회). path 예: "autopost_post_queue?id=eq.3"
+async function sbRest(method: string, path: string, body?: unknown, extra: Record<string, string> = {}) {
+  if (!SUPABASE_URL || !SERVICE_KEY) throw new Error("SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY 환경변수가 없습니다.");
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    method,
+    headers: {
+      apikey: SERVICE_KEY,
+      authorization: "Bearer " + SERVICE_KEY,
+      "content-type": "application/json",
+      ...extra,
+    },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  if (!r.ok) throw new Error("DB " + r.status + ": " + (await r.text()).slice(0, 300));
+  const txt = await r.text();
+  return txt ? JSON.parse(txt) : null;
+}
+
+// 소재 1건 → 요청 채널들 AI 생성 → 대기열에 pending 으로 적재
+async function queueGenerate(p: QueueGenInput) {
+  const channels = (p.channels && p.channels.length ? p.channels : Object.keys(CHANNEL_AGENTS))
+    .filter((c) => CHANNEL_AGENTS[c]);
+  if (!channels.length) throw new Error("유효한 채널이 없습니다.");
+
+  const out: Record<string, unknown> = {};
+  let totalUsd = 0;
+  for (const ch of channels) {
+    const res = await callClaude(buildPrompt({
+      channel: ch,
+      seed: p.raw_context,
+      kw: p.kw,
+      region: p.region,
+      model: p.model,
+      service: p.service,
+      pain: p.pain,
+      solution: p.solution,
+      postType: p.post_type,
+      imageDesc: p.image_desc,
+      imageCount: p.image_count,
+    }));
+    out[ch] = { text: res.text, usage: res.usage };
+    totalUsd += res.usage.usd;
+  }
+
+  const row = {
+    topic: p.topic,
+    raw_context: p.raw_context || "",
+    region: p.region || null,
+    post_type: p.post_type || null,
+    image_desc: p.image_desc || null,
+    image_count: p.image_count || 0,
+    channels: out,
+    status: "pending",
+    total_usd: +totalUsd.toFixed(5),
+  };
+  const inserted = await sbRest("POST", "autopost_post_queue", row, { Prefer: "return=representation" });
+  return Array.isArray(inserted) ? inserted[0] : inserted;
+}
+
+async function queueList(status?: string) {
+  const q = status
+    ? `autopost_post_queue?status=eq.${encodeURIComponent(status)}&order=created_at.desc`
+    : `autopost_post_queue?order=created_at.desc`;
+  return await sbRest("GET", q);
+}
+
+async function queueUpdate(id: number, patch: Record<string, unknown>) {
+  const updated = await sbRest("PATCH", `autopost_post_queue?id=eq.${id}`, patch, { Prefer: "return=representation" });
+  return Array.isArray(updated) ? updated[0] : updated;
+}
+
+async function queueDelete(id: number) {
+  await sbRest("DELETE", `autopost_post_queue?id=eq.${id}`);
+  return { deleted: id };
+}
+
 function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": ALLOW_ORIGIN,
@@ -454,6 +554,7 @@ Deno.serve(async (req: Request) => {
         vision: !!ANTHROPIC_KEY,
         imagegen: !!OPENAI_KEY,
         videogen: false,
+        queue: !!(SUPABASE_URL && SERVICE_KEY),
         channels: Object.keys(CHANNEL_AGENTS),
         publishers: {
           google: {
@@ -546,7 +647,36 @@ Deno.serve(async (req: Request) => {
       return jsonResponse(200, { ok: true, ...out });
     }
 
-    return jsonResponse(404, { ok: false, error: "Not found. 사용: GET /health, POST /generate, /analyze-image, /generate-image, /google/connect, /publish/google" });
+    // ── 대기열 파이프라인 ──
+    if (req.method === "POST" && sub === "/queue/generate") {
+      const p = await req.json() as QueueGenInput;
+      if (!p.topic) return jsonResponse(400, { ok: false, error: "topic 필요" });
+      const post = await queueGenerate(p);
+      return jsonResponse(200, { ok: true, post });
+    }
+
+    if (req.method === "GET" && sub === "/queue") {
+      const status = url.searchParams.get("status") || undefined;
+      const posts = await queueList(status);
+      return jsonResponse(200, { ok: true, posts });
+    }
+
+    if (req.method === "POST" && sub === "/queue/update") {
+      const p = await req.json() as { id?: number; status?: string; patch?: Record<string, unknown> };
+      if (!p.id) return jsonResponse(400, { ok: false, error: "id 필요" });
+      const patch = p.patch || (p.status ? { status: p.status } : {});
+      if (!Object.keys(patch).length) return jsonResponse(400, { ok: false, error: "status 또는 patch 필요" });
+      const post = await queueUpdate(p.id, patch);
+      return jsonResponse(200, { ok: true, post });
+    }
+
+    if (req.method === "POST" && sub === "/queue/delete") {
+      const p = await req.json() as { id?: number };
+      if (!p.id) return jsonResponse(400, { ok: false, error: "id 필요" });
+      return jsonResponse(200, { ok: true, ...(await queueDelete(p.id)) });
+    }
+
+    return jsonResponse(404, { ok: false, error: "Not found. 사용: GET /health, /queue · POST /generate, /analyze-image, /generate-image, /google/connect, /publish/google, /queue/generate, /queue/update, /queue/delete" });
   } catch (e) {
     return jsonResponse(500, { ok: false, error: (e as Error).message || String(e) });
   }
