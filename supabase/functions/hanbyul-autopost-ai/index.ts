@@ -101,6 +101,7 @@ interface GenInput {
   postType?: string;
   imageDesc?: string;
   imageCount?: number;
+  videoCount?: number;
   history?: string[];
 }
 
@@ -134,6 +135,20 @@ ${p.imageDesc}
 ${examples}`;
   })();
 
+  // 영상 마커: 블로그(네이버·구글)에서만. 첨부 영상이 본문 적정 위치에 모두 배치되도록.
+  const videoMarkerBlock = (() => {
+    const n = p.videoCount ?? 0;
+    if (n <= 0 || (p.channel !== "naver" && p.channel !== "google")) return "";
+    const examples = Array.from({ length: n }, (_, i) =>
+      `[🎬 영상 ${i + 1} — (이 자리에 들어갈 영상 내용을 한 줄로, 예: '설치 과정 타임랩스')]`
+    ).join("\n");
+    return `
+[영상 마커 — 절대 규칙]
+- 사용자가 영상을 정확히 ${n}개 첨부했습니다. 본문에 [🎬 영상 1] 부터 [🎬 영상 ${n}] 까지 마커를 반드시 ${n}개 모두, 사진 마커와 겹치지 않는 단락에 자연스럽게 배치하세요.
+- 각 마커는 한 줄 통째로(앞뒤 빈 줄). 형식 예시:
+${examples}`;
+  })();
+
   const histBlock = (p.history && p.history.length) ? `
 [참고: 이 채널의 과거 발행 사례 (톤·구성을 참고하되 내용은 새로 작성)]
 ${p.history.slice(0, 3).map((h, i) => `(${i + 1}) ${String(h).slice(0, 300)}`).join("\n---\n")}` : "";
@@ -149,6 +164,7 @@ ${agent}
 ${typeGuide}
 ${imageBlock}
 ${photoMarkerBlock}
+${videoMarkerBlock}
 ${histBlock}
 
 [이번 글의 입력값]
@@ -247,31 +263,42 @@ function escHtml(s: string): string {
 function textToBloggerHtml(
   text: string,
   images: { media_type?: string; data?: string; url?: string }[] = [],
+  videos: { url: string; caption?: string }[] = [],
 ): string {
   // 사진은 Storage URL(im.url) 우선, 없으면 base64(im.data)
   const srcOf = (im: { media_type?: string; data?: string; url?: string }) =>
     im.url ? im.url : `data:${im.media_type || "image/jpeg"};base64,${im.data}`;
-  const photoMarker = /\[📷[^\]]*\]/g;
+  // ── 사진: [📷 사진 N] 마커 자리에 순서대로, 남으면 끝에 전부 추가 ──
   let imgIdx = 0;
-  const replaced = text.replace(photoMarker, (m) => {
+  let replaced = text.replace(/\[📷[^\]]*\]/g, (m) => {
     const caption = m.replace(/[\[\]]/g, "").trim();
     if (imgIdx < images.length) {
       const im = images[imgIdx++];
-      // 캡션에 || 가 섞일 일은 없지만 안전하게 인코딩
-      const safeCaption = caption.replace(/\|/g, "│");
-      return `\n<!--IMG-->${srcOf(im)}||${safeCaption}<!--/IMG-->\n`;
+      return `\n<!--IMG-->${srcOf(im)}||${caption.replace(/\|/g, "│")}<!--/IMG-->\n`;
     }
     return `\n<!--PHOTO-->${caption}<!--/PHOTO-->\n`;
   });
-  // 마커보다 사진이 많으면 끝에 "현장 사진" 으로 덧붙임
-  let withExtras = replaced;
   if (imgIdx < images.length) {
-    const extras = images.slice(imgIdx).map((im) =>
+    replaced += images.slice(imgIdx).map((im) =>
       `\n\n<!--IMG-->${srcOf(im)}||현장 사진<!--/IMG-->\n`
     ).join("");
-    withExtras = replaced + extras;
   }
-  const paragraphs = withExtras.split(/\n{2,}/);
+  // ── 영상: [🎬 영상 N] 마커 자리에 순서대로, 남으면 끝에 전부 추가 ──
+  let vidIdx = 0;
+  replaced = replaced.replace(/\[🎬[^\]]*\]/g, (m) => {
+    const caption = m.replace(/[\[\]]/g, "").trim();
+    if (vidIdx < videos.length) {
+      const v = videos[vidIdx++];
+      return `\n<!--VID-->${v.url}||${caption.replace(/\|/g, "│")}<!--/VID-->\n`;
+    }
+    return `\n<!--VIDPH-->${caption}<!--/VIDPH-->\n`;
+  });
+  if (vidIdx < videos.length) {
+    replaced += videos.slice(vidIdx).map((v) =>
+      `\n\n<!--VID-->${v.url}||현장 영상<!--/VID-->\n`
+    ).join("");
+  }
+  const paragraphs = replaced.split(/\n{2,}/);
   return paragraphs.map((para) => {
     const trimmed = para.trim();
     if (!trimmed) return "";
@@ -282,9 +309,20 @@ function textToBloggerHtml(
       const caption = sep >= 0 ? inner.slice(sep + 2) : "";
       return `<div style="margin:14px 0;text-align:center"><img src="${src}" style="max-width:100%;height:auto;border-radius:8px"/>${caption ? `<div style="font-size:12px;color:#888;margin-top:6px">${escHtml(caption)}</div>` : ""}</div>`;
     }
+    if (trimmed.startsWith("<!--VID-->")) {
+      const inner = trimmed.replace(/<!--\/?VID-->/g, "").trim();
+      const sep = inner.indexOf("||");
+      const src = sep >= 0 ? inner.slice(0, sep) : inner;
+      const caption = sep >= 0 ? inner.slice(sep + 2) : "";
+      return `<div style="margin:14px 0;text-align:center"><video controls preload="metadata" src="${src}" style="max-width:100%;border-radius:8px"></video>${caption ? `<div style="font-size:12px;color:#888;margin-top:6px">${escHtml(caption)}</div>` : ""}</div>`;
+    }
     if (trimmed.startsWith("<!--PHOTO-->")) {
       const caption = trimmed.replace(/<!--\/?PHOTO-->/g, "").trim();
       return `<div style="border:2px dashed #ccc;border-radius:10px;padding:24px 12px;text-align:center;color:#aaa;margin:14px 0;font-size:13px">📷 ${escHtml(caption)}</div>`;
+    }
+    if (trimmed.startsWith("<!--VIDPH-->")) {
+      const caption = trimmed.replace(/<!--\/?VIDPH-->/g, "").trim();
+      return `<div style="border:2px dashed #ccc;border-radius:10px;padding:24px 12px;text-align:center;color:#aaa;margin:14px 0;font-size:13px">🎬 ${escHtml(caption)}</div>`;
     }
     return `<p>${escHtml(trimmed).replace(/\n/g, "<br/>")}</p>`;
   }).filter(Boolean).join("\n");
@@ -399,13 +437,14 @@ async function publishGoogle(p: {
   blogId?: string;
   isDraft?: boolean;
   images?: { media_type?: string; data?: string; url?: string }[];
+  videos?: { url: string; caption?: string }[];
 }) {
   const blogId = p.blogId || GOOGLE_BLOG_ID;
   if (!blogId) throw new Error("blogId 또는 GOOGLE_BLOG_ID 시크릿이 필요합니다.");
   const accessToken = await googleAccessToken();
 
   const isHtml = /<\w+[^>]*>/.test(p.content);
-  const html = isHtml ? p.content : textToBloggerHtml(p.content, p.images || []);
+  const html = isHtml ? p.content : textToBloggerHtml(p.content, p.images || [], p.videos || []);
 
   const body = {
     kind: "blogger#post",
@@ -443,6 +482,7 @@ interface QueueGenInput {
   post_type?: string;        // review|guide|case
   image_desc?: string;
   image_count?: number;
+  video_count?: number;
   kw?: string;
   model?: string;
   service?: string;
@@ -490,6 +530,7 @@ async function queueGenerate(p: QueueGenInput) {
       postType: p.post_type,
       imageDesc: p.image_desc,
       imageCount: p.image_count,
+      videoCount: p.video_count,
     }));
     out[ch] = { text: res.text, usage: res.usage };
     totalUsd += res.usage.usd;
@@ -531,7 +572,7 @@ async function queueDelete(id: number) {
 async function uploadMedia(images: { data: string; media_type?: string }[]) {
   if (!SUPABASE_URL || !SERVICE_KEY) throw new Error("Storage 환경변수(SUPABASE_URL/SERVICE_ROLE)가 없습니다.");
   const out: { url: string }[] = [];
-  for (const img of images.slice(0, 10)) {
+  for (const img of images.slice(0, 60)) {   // 사실상 무제한(콘솔이 4장씩 나눠 호출)
     const mt = img.media_type || "image/jpeg";
     const ext = mt.includes("png") ? "png" : mt.includes("webp") ? "webp" : "jpg";
     const path = `posts/${crypto.randomUUID()}.${ext}`;
@@ -552,6 +593,27 @@ async function uploadMedia(images: { data: string; media_type?: string }[]) {
   return out;
 }
 
+// 영상은 용량이 커서 base64 불가 → 브라우저가 직접 올릴 서명 업로드 URL 발급.
+async function signUpload(files: { ext?: string }[]) {
+  if (!SUPABASE_URL || !SERVICE_KEY) throw new Error("Storage 환경변수가 없습니다.");
+  const out: { uploadUrl: string; publicUrl: string }[] = [];
+  for (const f of files.slice(0, 10)) {
+    const ext = (f.ext || "mp4").replace(/[^a-z0-9]/gi, "").slice(0, 5) || "mp4";
+    const path = `videos/${crypto.randomUUID()}.${ext}`;
+    const r = await fetch(`${SUPABASE_URL}/storage/v1/object/upload/sign/autopost-media/${path}`, {
+      method: "POST",
+      headers: { apikey: SERVICE_KEY, authorization: "Bearer " + SERVICE_KEY, "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    if (!r.ok) throw new Error("Storage sign " + r.status + ": " + (await r.text()).slice(0, 200));
+    const d = await r.json();            // { url: "/object/upload/sign/autopost-media/<path>?token=..." }
+    const rel = d.url || d.signedUrl || "";
+    const uploadUrl = rel.startsWith("http") ? rel : `${SUPABASE_URL}/storage/v1${rel.startsWith("/") ? rel : "/" + rel}`;
+    out.push({ uploadUrl, publicUrl: `${SUPABASE_URL}/storage/v1/object/public/autopost-media/${path}` });
+  }
+  return out;
+}
+
 // 콘솔이 이미 생성해 둔 초안(channels 맵)을 재생성 없이 대기열에 pending 으로 적재
 async function queueSave(p: {
   topic: string;
@@ -562,6 +624,7 @@ async function queueSave(p: {
   image_count?: number;
   channels: Record<string, { text: string; usage?: unknown }>;
   images?: { url: string; caption?: string }[];
+  videos?: { url: string; caption?: string }[];
   total_usd?: number;
   scheduled_at?: string | null;
 }) {
@@ -575,6 +638,7 @@ async function queueSave(p: {
     image_count: p.image_count || 0,
     channels: p.channels,
     images: p.images || [],
+    videos: p.videos || [],
     status: "pending",
     total_usd: p.total_usd || 0,
     scheduled_at: p.scheduled_at || null,
@@ -691,6 +755,7 @@ Deno.serve(async (req: Request) => {
         blogId?: string;
         isDraft?: boolean;
         images?: { media_type?: string; data?: string; url?: string }[];
+        videos?: { url: string; caption?: string }[];
       };
       if (!p.title || !p.content) {
         return jsonResponse(400, { ok: false, error: "title, content 필요" });
@@ -702,6 +767,7 @@ Deno.serve(async (req: Request) => {
         blogId: p.blogId,
         isDraft: p.isDraft,
         images: p.images,
+        videos: p.videos,
       });
       return jsonResponse(200, { ok: true, ...out });
     }
@@ -747,6 +813,13 @@ Deno.serve(async (req: Request) => {
       if (!p.images || !p.images.length) return jsonResponse(400, { ok: false, error: "images 필요" });
       const images = await uploadMedia(p.images);
       return jsonResponse(200, { ok: true, images });
+    }
+
+    if (req.method === "POST" && sub === "/media/sign-upload") {
+      const p = await req.json() as { files?: { ext?: string }[] };
+      if (!p.files || !p.files.length) return jsonResponse(400, { ok: false, error: "files 필요" });
+      const items = await signUpload(p.files);
+      return jsonResponse(200, { ok: true, items });
     }
 
     return jsonResponse(404, { ok: false, error: "Not found. 사용: GET /health, /queue · POST /generate, /analyze-image, /generate-image, /google/connect, /publish/google, /queue/generate, /queue/update, /queue/delete" });

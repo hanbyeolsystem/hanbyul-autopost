@@ -640,7 +640,8 @@ document.getElementById('gen').onclick = async ()=>{
   drafts = {};
 
   const imageCount = media.filter(f=>f.type.startsWith('image/')).length;
-  const payloadBase = {seed, kw, tone, region, model, service, pain, solution, postType, imageDesc: imageDescText, imageCount};
+  const videoCount = media.filter(f=>f.type.startsWith('video/')).length;
+  const payloadBase = {seed, kw, tone, region, model, service, pain, solution, postType, imageDesc: imageDescText, imageCount, videoCount};
 
   // ① 각 채널 카드(껍데기)를 먼저 만들고, 본문만 '작성 중'으로 표시
   const cardMap = {};
@@ -1030,12 +1031,34 @@ function qApiBase(){ return document.getElementById('apiBase').value.trim(); }
 
 // 첨부 사진을 Storage 에 올려 URL 배열 반환 (대기열이 사진을 들고 다니도록)
 async function uploadCurrentMedia(apiBase){
-  const files = media.filter(f=>f.type.startsWith('image/')).slice(0,10);
+  const files = media.filter(f=>f.type.startsWith('image/'));   // 개수 제한 없음 — 전부 사용
   if(!files.length) return [];
-  const b64 = await Promise.all(files.map(f=>fileToResizedB64(f)));   // [{media_type,data}]
-  const r = await aiFetch(apiBase,'/media/upload',{method:'POST',body:JSON.stringify({images:b64})});
-  const d = await r.json(); if(!r.ok||!d.ok) throw new Error(d.error||'사진 업로드 실패');
-  return d.images||[];   // [{url}]
+  const out=[]; const B=4;   // 요청 크기 한계 회피: 4장씩 나눠 업로드
+  for(let i=0;i<files.length;i+=B){
+    const b64 = await Promise.all(files.slice(i,i+B).map(f=>fileToResizedB64(f)));
+    const r = await aiFetch(apiBase,'/media/upload',{method:'POST',body:JSON.stringify({images:b64})});
+    const d = await r.json(); if(!r.ok||!d.ok) throw new Error(d.error||'사진 업로드 실패');
+    out.push(...(d.images||[]));
+  }
+  return out;   // [{url}] — 첨부한 사진 전부
+}
+
+// 대기열에서 복원된 영상 URL (발행·ZIP 에 사용)
+let mediaVideoURLs = [];
+// 첨부 영상을 Storage 에 직접 업로드(서명 URL) → URL 배열. 영상 전부 사용.
+async function uploadCurrentVideos(apiBase){
+  const vids = media.filter(f=>f.type.startsWith('video/'));
+  if(!vids.length) return [];
+  const exts = vids.map(f=>({ext:((f.name.match(/\.([^.]+)$/)||[null,'mp4'])[1]||'mp4').toLowerCase()}));
+  const sign = await aiFetch(apiBase,'/media/sign-upload',{method:'POST',body:JSON.stringify({files:exts})});
+  const sd = await sign.json(); if(!sign.ok||!sd.ok) throw new Error(sd.error||'영상 업로드 URL 발급 실패');
+  const out=[];
+  for(let i=0;i<vids.length;i++){
+    const put=await fetch(sd.items[i].uploadUrl,{method:'PUT',headers:{'Content-Type':vids[i].type||'video/mp4','x-upsert':'true'},body:vids[i]});
+    if(!put.ok) throw new Error('영상 업로드 실패 ('+put.status+')');
+    out.push({url:sd.items[i].publicUrl});
+  }
+  return out;   // [{url}] — 첨부한 영상 전부
 }
 
 // 본문의 [📷 사진 N — 캡션] 에서 캡션만 뽑아 파일명에 사용 (순서 매칭)
@@ -1047,11 +1070,12 @@ function markerCaptions(t){
   }
   return out;
 }
-// 반자동 채널용: File 객체 우선, 없으면 복원된 Storage URL 에서 가져오기
+// 반자동 채널용: 사진+영상 모두 ZIP 에. File 우선, 없으면 복원된 Storage URL.
 function mediaSourcesForZip(){
-  const files = media.filter(f=>f.type.startsWith('image/'));
-  if(files.length) return files.map(f=>({getBlob:async()=>f, ext:(f.name.match(/\.[^.]+$/)||['.jpg'])[0]}));
-  return mediaImageURLs.filter(u=>/^https?:/.test(u)).map(u=>({getBlob:async()=>(await fetch(u)).blob(), ext:(u.match(/\.(png|jpg|jpeg|webp)/i)||['.jpg'])[0]}));
+  const files = media.filter(f=>f.type.startsWith('image/')||f.type.startsWith('video/'));
+  if(files.length) return files.map(f=>({getBlob:async()=>f, ext:(f.name.match(/\.[^.]+$/)||['.bin'])[0]}));
+  const urls=[...mediaImageURLs, ...mediaVideoURLs].filter(u=>/^https?:/.test(u));
+  return urls.map(u=>({getBlob:async()=>(await fetch(u)).blob(), ext:(u.match(/\.(png|jpg|jpeg|webp|mp4|mov|webm)/i)||['.bin'])[0]}));
 }
 
 // 예약/채택: 단일 채널 글을 DB 대기열에 pending 으로 저장 (scheduled_at 옵션)
@@ -1059,8 +1083,8 @@ async function addToQueue(ch, text, when){
   saveHistory(ch.id, text);   // 채택한 글을 채널 메모리에 학습 저장
   const apiBase=qApiBase();
   if(!apiBase){ alert('AI 백엔드 주소가 필요합니다 (대기열은 DB에 저장됩니다).'); return; }
-  let images=[];
-  try{ images=await uploadCurrentMedia(apiBase); }catch(e){ /* 사진 없이 진행 */ }
+  let images=[], videos=[];
+  try{ images=await uploadCurrentMedia(apiBase); videos=await uploadCurrentVideos(apiBase); }catch(e){ /* 미디어 없이 진행 */ }
   const body={
     topic:(document.getElementById('seed').value||'').slice(0,200)||(ch.name+' 글'),
     raw_context:document.getElementById('seed').value||'',
@@ -1068,7 +1092,7 @@ async function addToQueue(ch, text, when){
     post_type:document.getElementById('posttype').value||'',
     image_desc:imageDescText||'',
     image_count:media.filter(f=>f.type.startsWith('image/')).length,
-    channels:{[ch.id]:{text}}, images,
+    channels:{[ch.id]:{text}}, images, videos,
     scheduled_at: when? new Date(when).toISOString() : null,
   };
   try{
@@ -1094,6 +1118,7 @@ function loadRowToCards(p){
   // 저장된 사진 URL 복원 → 미리보기·발행에서 마커 자리에 배치됨
   media=[];                                   // File 객체는 없음(다른 기기일 수 있음)
   mediaImageURLs=(p.images||[]).map(i=>i.url);
+  mediaVideoURLs=(p.videos||[]).map(v=>v.url);
   imageDescText=p.image_desc||'';
   const cards=document.getElementById('cards'); cards.innerHTML='';
   document.getElementById('empty').style.display='none';
@@ -1351,22 +1376,31 @@ async function publishNow(ch, text){
     const blogId = (localStorage.getItem('hanbyul_google_blog_id')||'').trim();
     const { title, body } = splitTitleAndBody(text);
     // 첨부 사진 → 리사이즈된 base64 (최대 8장). [📷 사진 N — ...] 마커 자리에 인라인 삽입.
-    const imgFiles = media.filter(f => f.type.startsWith('image/')).slice(0, 8);
     let images = [];
+    const imgFiles = media.filter(f => f.type.startsWith('image/'));
     if (imgFiles.length) {
+      // 첨부 사진 전부 Storage 업로드 → URL (개수 제한 없음). 마커보다 많으면 글 끝에 자동 추가.
       try {
-        images = await Promise.all(imgFiles.map(f => fileToResizedB64(f)));
+        images = await uploadCurrentMedia(apiBase);
       } catch (e) {
-        if (!confirm('사진 인코딩 실패: ' + (e.message || e) + '\n사진 없이 발행할까요?')) return;
+        if (!confirm('사진 업로드 실패: ' + (e.message || e) + '\n사진 없이 발행할까요?')) return;
       }
     } else if (mediaImageURLs.length) {
-      // 대기열에서 불러온 경우: Storage URL 을 마커 자리에 사용
+      // 대기열에서 불러온 경우: 저장된 Storage URL 을 전부 사용
       images = mediaImageURLs.filter(u=>/^https?:/.test(u)).map(u=>({url:u}));
+    }
+    // 영상: 첨부 영상 전부 업로드하거나, 대기열에서 복원된 영상 URL 사용 → [🎬 영상 N] 자리에 <video> 임베드
+    let videos = [];
+    const vidFiles = media.filter(f => f.type.startsWith('video/'));
+    if (vidFiles.length) {
+      try { videos = await uploadCurrentVideos(apiBase); } catch (e) { if (!confirm('영상 업로드 실패: '+(e.message||e)+'\n영상 없이 발행할까요?')) return; }
+    } else if (mediaVideoURLs.length) {
+      videos = mediaVideoURLs.filter(u=>/^https?:/.test(u)).map(u=>({url:u}));
     }
     try {
       const r = await aiFetch(apiBase, '/publish/google', {
         method: 'POST',
-        body: JSON.stringify({ title, content: body, blogId: blogId || undefined, images })
+        body: JSON.stringify({ title, content: body, blogId: blogId || undefined, images, videos })
       });
       const d = await r.json().catch(()=>({ok:false,error:'응답 파싱 실패'}));
       if (!r.ok || !d.ok) throw new Error(d.error || ('HTTP '+r.status));
@@ -1390,9 +1424,12 @@ document.getElementById('bulkQueue').onclick=async ()=>{
   const apiBase=qApiBase(); if(!apiBase){ alert('AI 백엔드 주소가 필요합니다.'); return; }
   const channels={}; ids.forEach(id=>{ channels[id]={text:drafts[id]}; });
   const btn=document.getElementById('bulkQueue'); const old=btn.textContent; btn.textContent='저장 중…';
-  let images=[];
-  try{ btn.textContent='사진 올리는 중…'; images=await uploadCurrentMedia(apiBase); }
-  catch(e){ if(!confirm('사진 업로드 실패('+e.message+').\n사진 없이 대기열에 저장할까요?')){ btn.textContent=old; return; } }
+  let images=[], videos=[];
+  try{
+    btn.textContent='사진 올리는 중…'; images=await uploadCurrentMedia(apiBase);
+    btn.textContent='영상 올리는 중…'; videos=await uploadCurrentVideos(apiBase);
+  }
+  catch(e){ if(!confirm('미디어 업로드 실패('+e.message+').\n미디어 없이 대기열에 저장할까요?')){ btn.textContent=old; return; } }
   const body={
     topic:(document.getElementById('seed').value||'').slice(0,200)||'제목 미정',
     raw_context:document.getElementById('seed').value||'',
@@ -1400,7 +1437,7 @@ document.getElementById('bulkQueue').onclick=async ()=>{
     post_type:document.getElementById('posttype').value||'',
     image_desc:imageDescText||'',
     image_count:media.filter(f=>f.type.startsWith('image/')).length,
-    channels, images,
+    channels, images, videos,
   };
   btn.textContent='저장 중…';
   try{
