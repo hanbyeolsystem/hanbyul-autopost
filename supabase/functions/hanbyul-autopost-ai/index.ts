@@ -524,6 +524,35 @@ async function queueDelete(id: number) {
   return { deleted: id };
 }
 
+// 콘솔이 이미 생성해 둔 초안(channels 맵)을 재생성 없이 대기열에 pending 으로 적재
+async function queueSave(p: {
+  topic: string;
+  raw_context?: string;
+  region?: string;
+  post_type?: string;
+  image_desc?: string;
+  image_count?: number;
+  channels: Record<string, { text: string; usage?: unknown }>;
+  total_usd?: number;
+  scheduled_at?: string | null;
+}) {
+  if (!p.channels || !Object.keys(p.channels).length) throw new Error("channels 가 비었습니다.");
+  const row = {
+    topic: p.topic,
+    raw_context: p.raw_context || "",
+    region: p.region || null,
+    post_type: p.post_type || null,
+    image_desc: p.image_desc || null,
+    image_count: p.image_count || 0,
+    channels: p.channels,
+    status: "pending",
+    total_usd: p.total_usd || 0,
+    scheduled_at: p.scheduled_at || null,
+  };
+  const inserted = await sbRest("POST", "autopost_post_queue", row, { Prefer: "return=representation" });
+  return Array.isArray(inserted) ? inserted[0] : inserted;
+}
+
 function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": ALLOW_ORIGIN,
@@ -674,6 +703,13 @@ Deno.serve(async (req: Request) => {
       const p = await req.json() as { id?: number };
       if (!p.id) return jsonResponse(400, { ok: false, error: "id 필요" });
       return jsonResponse(200, { ok: true, ...(await queueDelete(p.id)) });
+    }
+
+    if (req.method === "POST" && sub === "/queue/save") {
+      const p = await req.json() as Parameters<typeof queueSave>[0];
+      if (!p.topic || !p.channels) return jsonResponse(400, { ok: false, error: "topic, channels 필요" });
+      const post = await queueSave(p);
+      return jsonResponse(200, { ok: true, post });
     }
 
     return jsonResponse(404, { ok: false, error: "Not found. 사용: GET /health, /queue · POST /generate, /analyze-image, /generate-image, /google/connect, /publish/google, /queue/generate, /queue/update, /queue/delete" });
