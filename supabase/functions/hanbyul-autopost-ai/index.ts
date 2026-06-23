@@ -246,8 +246,11 @@ function escHtml(s: string): string {
 // 마커보다 사진이 많으면 본문 끝에 추가. 마커가 많으면 남은 자리는 placeholder 박스 유지.
 function textToBloggerHtml(
   text: string,
-  images: { media_type: string; data: string }[] = [],
+  images: { media_type?: string; data?: string; url?: string }[] = [],
 ): string {
+  // 사진은 Storage URL(im.url) 우선, 없으면 base64(im.data)
+  const srcOf = (im: { media_type?: string; data?: string; url?: string }) =>
+    im.url ? im.url : `data:${im.media_type || "image/jpeg"};base64,${im.data}`;
   const photoMarker = /\[📷[^\]]*\]/g;
   let imgIdx = 0;
   const replaced = text.replace(photoMarker, (m) => {
@@ -256,7 +259,7 @@ function textToBloggerHtml(
       const im = images[imgIdx++];
       // 캡션에 || 가 섞일 일은 없지만 안전하게 인코딩
       const safeCaption = caption.replace(/\|/g, "│");
-      return `\n<!--IMG-->data:${im.media_type};base64,${im.data}||${safeCaption}<!--/IMG-->\n`;
+      return `\n<!--IMG-->${srcOf(im)}||${safeCaption}<!--/IMG-->\n`;
     }
     return `\n<!--PHOTO-->${caption}<!--/PHOTO-->\n`;
   });
@@ -264,7 +267,7 @@ function textToBloggerHtml(
   let withExtras = replaced;
   if (imgIdx < images.length) {
     const extras = images.slice(imgIdx).map((im) =>
-      `\n\n<!--IMG-->data:${im.media_type};base64,${im.data}||현장 사진<!--/IMG-->\n`
+      `\n\n<!--IMG-->${srcOf(im)}||현장 사진<!--/IMG-->\n`
     ).join("");
     withExtras = replaced + extras;
   }
@@ -395,7 +398,7 @@ async function publishGoogle(p: {
   labels?: string[];
   blogId?: string;
   isDraft?: boolean;
-  images?: { media_type: string; data: string }[];
+  images?: { media_type?: string; data?: string; url?: string }[];
 }) {
   const blogId = p.blogId || GOOGLE_BLOG_ID;
   if (!blogId) throw new Error("blogId 또는 GOOGLE_BLOG_ID 시크릿이 필요합니다.");
@@ -524,6 +527,31 @@ async function queueDelete(id: number) {
   return { deleted: id };
 }
 
+// 첨부 사진(base64) → Storage 업로드 → 공개 URL. 대기열이 사진을 들고 다니게 함.
+async function uploadMedia(images: { data: string; media_type?: string }[]) {
+  if (!SUPABASE_URL || !SERVICE_KEY) throw new Error("Storage 환경변수(SUPABASE_URL/SERVICE_ROLE)가 없습니다.");
+  const out: { url: string }[] = [];
+  for (const img of images.slice(0, 10)) {
+    const mt = img.media_type || "image/jpeg";
+    const ext = mt.includes("png") ? "png" : mt.includes("webp") ? "webp" : "jpg";
+    const path = `posts/${crypto.randomUUID()}.${ext}`;
+    const bytes = Uint8Array.from(atob(img.data), (c) => c.charCodeAt(0));
+    const r = await fetch(`${SUPABASE_URL}/storage/v1/object/autopost-media/${path}`, {
+      method: "POST",
+      headers: {
+        apikey: SERVICE_KEY,
+        authorization: "Bearer " + SERVICE_KEY,
+        "content-type": mt,
+        "x-upsert": "true",
+      },
+      body: bytes,
+    });
+    if (!r.ok) throw new Error("Storage " + r.status + ": " + (await r.text()).slice(0, 200));
+    out.push({ url: `${SUPABASE_URL}/storage/v1/object/public/autopost-media/${path}` });
+  }
+  return out;
+}
+
 // 콘솔이 이미 생성해 둔 초안(channels 맵)을 재생성 없이 대기열에 pending 으로 적재
 async function queueSave(p: {
   topic: string;
@@ -533,6 +561,7 @@ async function queueSave(p: {
   image_desc?: string;
   image_count?: number;
   channels: Record<string, { text: string; usage?: unknown }>;
+  images?: { url: string; caption?: string }[];
   total_usd?: number;
   scheduled_at?: string | null;
 }) {
@@ -545,6 +574,7 @@ async function queueSave(p: {
     image_desc: p.image_desc || null,
     image_count: p.image_count || 0,
     channels: p.channels,
+    images: p.images || [],
     status: "pending",
     total_usd: p.total_usd || 0,
     scheduled_at: p.scheduled_at || null,
@@ -660,7 +690,7 @@ Deno.serve(async (req: Request) => {
         labels?: string[];
         blogId?: string;
         isDraft?: boolean;
-        images?: { media_type: string; data: string }[];
+        images?: { media_type?: string; data?: string; url?: string }[];
       };
       if (!p.title || !p.content) {
         return jsonResponse(400, { ok: false, error: "title, content 필요" });
@@ -710,6 +740,13 @@ Deno.serve(async (req: Request) => {
       if (!p.topic || !p.channels) return jsonResponse(400, { ok: false, error: "topic, channels 필요" });
       const post = await queueSave(p);
       return jsonResponse(200, { ok: true, post });
+    }
+
+    if (req.method === "POST" && sub === "/media/upload") {
+      const p = await req.json() as { images?: { data: string; media_type?: string }[] };
+      if (!p.images || !p.images.length) return jsonResponse(400, { ok: false, error: "images 필요" });
+      const images = await uploadMedia(p.images);
+      return jsonResponse(200, { ok: true, images });
     }
 
     return jsonResponse(404, { ok: false, error: "Not found. 사용: GET /health, /queue · POST /generate, /analyze-image, /generate-image, /google/connect, /publish/google, /queue/generate, /queue/update, /queue/delete" });

@@ -1028,11 +1028,39 @@ const CH_BY_ID = Object.fromEntries(CHANNELS.map(c=>[c.id,c]));
 const STATUS_BADGE = {pending:'검토대기', approved:'승인됨', published:'발행완료', failed:'실패'};
 function qApiBase(){ return document.getElementById('apiBase').value.trim(); }
 
+// 첨부 사진을 Storage 에 올려 URL 배열 반환 (대기열이 사진을 들고 다니도록)
+async function uploadCurrentMedia(apiBase){
+  const files = media.filter(f=>f.type.startsWith('image/')).slice(0,10);
+  if(!files.length) return [];
+  const b64 = await Promise.all(files.map(f=>fileToResizedB64(f)));   // [{media_type,data}]
+  const r = await aiFetch(apiBase,'/media/upload',{method:'POST',body:JSON.stringify({images:b64})});
+  const d = await r.json(); if(!r.ok||!d.ok) throw new Error(d.error||'사진 업로드 실패');
+  return d.images||[];   // [{url}]
+}
+
+// 본문의 [📷 사진 N — 캡션] 에서 캡션만 뽑아 파일명에 사용 (순서 매칭)
+function markerCaptions(t){
+  const out=[]; const re=/\[📷[^\]]*\]/g; let m;
+  while((m=re.exec(t))!==null){
+    let c=m[0].replace(/^\[📷\s*/,'').replace(/\]$/,'').replace(/^사진\s*\d+\s*[—\-]?\s*/,'').trim();
+    out.push((c||('사진'+(out.length+1))).replace(/[\\/:*?"<>|]/g,'').slice(0,30));
+  }
+  return out;
+}
+// 반자동 채널용: File 객체 우선, 없으면 복원된 Storage URL 에서 가져오기
+function mediaSourcesForZip(){
+  const files = media.filter(f=>f.type.startsWith('image/'));
+  if(files.length) return files.map(f=>({getBlob:async()=>f, ext:(f.name.match(/\.[^.]+$/)||['.jpg'])[0]}));
+  return mediaImageURLs.filter(u=>/^https?:/.test(u)).map(u=>({getBlob:async()=>(await fetch(u)).blob(), ext:(u.match(/\.(png|jpg|jpeg|webp)/i)||['.jpg'])[0]}));
+}
+
 // 예약/채택: 단일 채널 글을 DB 대기열에 pending 으로 저장 (scheduled_at 옵션)
 async function addToQueue(ch, text, when){
   saveHistory(ch.id, text);   // 채택한 글을 채널 메모리에 학습 저장
   const apiBase=qApiBase();
   if(!apiBase){ alert('AI 백엔드 주소가 필요합니다 (대기열은 DB에 저장됩니다).'); return; }
+  let images=[];
+  try{ images=await uploadCurrentMedia(apiBase); }catch(e){ /* 사진 없이 진행 */ }
   const body={
     topic:(document.getElementById('seed').value||'').slice(0,200)||(ch.name+' 글'),
     raw_context:document.getElementById('seed').value||'',
@@ -1040,7 +1068,7 @@ async function addToQueue(ch, text, when){
     post_type:document.getElementById('posttype').value||'',
     image_desc:imageDescText||'',
     image_count:media.filter(f=>f.type.startsWith('image/')).length,
-    channels:{[ch.id]:{text}},
+    channels:{[ch.id]:{text}}, images,
     scheduled_at: when? new Date(when).toISOString() : null,
   };
   try{
@@ -1063,6 +1091,10 @@ async function queueAction(path, body){
 // DB 대기열 행 → 생성결과 카드로 복원 (다른 기기에서 불러와 발행)
 function loadRowToCards(p){
   drafts={};
+  // 저장된 사진 URL 복원 → 미리보기·발행에서 마커 자리에 배치됨
+  media=[];                                   // File 객체는 없음(다른 기기일 수 있음)
+  mediaImageURLs=(p.images||[]).map(i=>i.url);
+  imageDescText=p.image_desc||'';
   const cards=document.getElementById('cards'); cards.innerHTML='';
   document.getElementById('empty').style.display='none';
   Object.keys(p.channels||{}).forEach(id=>{
@@ -1269,7 +1301,8 @@ async function publishNow(ch, text){
   }
   if (ch.id === 'naver') {
     // 반자동: 텍스트는 클립보드 + 사진은 ZIP 다운로드 + 네이버 글쓰기 새 탭 + 안내
-    const imgFiles = media.filter(f => f.type.startsWith('image/'));
+    const sources = mediaSourcesForZip();   // File 또는 복원된 URL
+    const caps = markerCaptions(text);       // 마커 순서대로 캡션
     try {
       await navigator.clipboard.writeText(text);
     } catch (e) {
@@ -1277,15 +1310,14 @@ async function publishNow(ch, text){
       return;
     }
     let zipMsg = '';
-    if (imgFiles.length && typeof JSZip !== 'undefined') {
+    if (sources.length && typeof JSZip !== 'undefined') {
       try {
         const zip = new JSZip();
-        // 순서 보존: 01_원본명.확장자, 02_…
-        for (let i = 0; i < imgFiles.length; i++) {
-          const f = imgFiles[i];
+        // 마커 순서대로: 01_캡션.ext — 본문 [📷 사진 N] 자리와 1:1 매칭
+        for (let i = 0; i < sources.length; i++) {
           const idx = String(i + 1).padStart(2, '0');
-          const ext = (f.name.match(/\.[^.]+$/) || ['.jpg'])[0];
-          zip.file(`${idx}_사진${ext}`, f);
+          const cap = caps[i] ? ('_' + caps[i]) : '';
+          zip.file(`${idx}${cap}${sources[i].ext}`, await sources[i].getBlob());
         }
         const blob = await zip.generateAsync({ type: 'blob' });
         const url = URL.createObjectURL(blob);
@@ -1296,11 +1328,11 @@ async function publishNow(ch, text){
         a.download = `네이버블로그_사진_${ymd}.zip`;
         document.body.appendChild(a); a.click(); a.remove();
         setTimeout(()=>URL.revokeObjectURL(url), 2000);
-        zipMsg = `\n📦 사진 ${imgFiles.length}장이 ZIP 으로 내려받아졌습니다 (다운로드 폴더 확인).`;
+        zipMsg = `\n📦 사진 ${sources.length}장이 ZIP 으로 내려받아졌습니다 (파일명=본문 사진 순서, 다운로드 폴더 확인).`;
       } catch (e) {
         zipMsg = `\n⚠ 사진 ZIP 생성 실패: ${e.message} — 사진은 따로 첨부해주세요.`;
       }
-    } else if (imgFiles.length) {
+    } else if (sources.length) {
       zipMsg = `\n⚠ ZIP 라이브러리 미로드 — 사진은 따로 첨부해주세요.`;
     }
     addToBoard(ch.id, makePost(ch, text, '발행', { url: 'https://blog.naver.com/' }));
@@ -1327,6 +1359,9 @@ async function publishNow(ch, text){
       } catch (e) {
         if (!confirm('사진 인코딩 실패: ' + (e.message || e) + '\n사진 없이 발행할까요?')) return;
       }
+    } else if (mediaImageURLs.length) {
+      // 대기열에서 불러온 경우: Storage URL 을 마커 자리에 사용
+      images = mediaImageURLs.filter(u=>/^https?:/.test(u)).map(u=>({url:u}));
     }
     try {
       const r = await aiFetch(apiBase, '/publish/google', {
@@ -1354,6 +1389,10 @@ document.getElementById('bulkQueue').onclick=async ()=>{
   const ids=Object.keys(drafts); if(!ids.length){ alert('생성된 글이 없습니다.'); return; }
   const apiBase=qApiBase(); if(!apiBase){ alert('AI 백엔드 주소가 필요합니다.'); return; }
   const channels={}; ids.forEach(id=>{ channels[id]={text:drafts[id]}; });
+  const btn=document.getElementById('bulkQueue'); const old=btn.textContent; btn.textContent='저장 중…';
+  let images=[];
+  try{ btn.textContent='사진 올리는 중…'; images=await uploadCurrentMedia(apiBase); }
+  catch(e){ if(!confirm('사진 업로드 실패('+e.message+').\n사진 없이 대기열에 저장할까요?')){ btn.textContent=old; return; } }
   const body={
     topic:(document.getElementById('seed').value||'').slice(0,200)||'제목 미정',
     raw_context:document.getElementById('seed').value||'',
@@ -1361,9 +1400,9 @@ document.getElementById('bulkQueue').onclick=async ()=>{
     post_type:document.getElementById('posttype').value||'',
     image_desc:imageDescText||'',
     image_count:media.filter(f=>f.type.startsWith('image/')).length,
-    channels,
+    channels, images,
   };
-  const btn=document.getElementById('bulkQueue'); const old=btn.textContent; btn.textContent='저장 중…';
+  btn.textContent='저장 중…';
   try{
     const r=await aiFetch(apiBase,'/queue/save',{method:'POST',body:JSON.stringify(body)});
     const d=await r.json(); if(!r.ok||!d.ok) throw new Error(d.error||('HTTP '+r.status));
