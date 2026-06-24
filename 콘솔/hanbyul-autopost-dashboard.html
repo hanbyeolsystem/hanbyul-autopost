@@ -349,6 +349,7 @@ drop.ondragleave = ()=>drop.style.borderColor='';
 drop.ondrop = e=>{e.preventDefault();drop.style.borderColor='';handleFiles(e.dataTransfer.files)};
 fileInput.onchange = e=>handleFiles(e.target.files);
 let mediaImageURLs = [];   // 업로드한 사진 미리보기용 URL
+let mediaVideoURLs = [];   // 업로드/복원한 영상 URL (미리보기·발행·ZIP)
 let cardImages = {};       // 채널별 AI 생성 이미지 URL (미리보기에 사용)
 let cardVideos = {};       // 채널별 AI 생성 영상 URL (게시판/미리보기에 사용)
 function handleFiles(files){
@@ -359,9 +360,15 @@ function handleFiles(files){
       mediaImageURLs.push(url);
       const img=document.createElement('img');img.className='t';
       img.src=url;thumbs.appendChild(img);
+    }else if(f.type.startsWith('video/')){
+      const url=URL.createObjectURL(f);
+      mediaVideoURLs.push(url);                 // 미리보기·발행에서 사용
+      const v=document.createElement('video');v.className='t';v.src=url;v.muted=true;
+      v.style.cssText='width:54px;height:54px;object-fit:cover;border-radius:8px';
+      thumbs.appendChild(v);
     }else{
       const d=document.createElement('div');d.className='file';
-      d.textContent='🎬 '+f.name.slice(0,14);thumbs.appendChild(d);
+      d.textContent='📎 '+f.name.slice(0,14);thumbs.appendChild(d);
     }
   });
   // 이미지가 하나라도 있으면 '사진 분석' 버튼 노출
@@ -808,6 +815,12 @@ function previewImages(ch){
   mediaImageURLs.forEach(u=> imgs.push(u));
   return imgs;
 }
+function previewVideos(ch){
+  const v=[];
+  if(cardVideos[ch.id]) v.push(cardVideos[ch.id]);
+  mediaVideoURLs.forEach(u=> v.push(u));
+  return v;
+}
 function imgStrip(urls, h){
   if(!urls.length) return '';
   return `<div style="display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px">`+
@@ -815,26 +828,33 @@ function imgStrip(urls, h){
 }
 
 // 본문의 [📷 사진 N …] 자리를 실제 사진으로 치환. 사진 부족하면 점선 박스.
-function renderBodyWithPhotos(text, urls){
-  const re = /\[📷[^\]]*\]/g;            // [📷 사진 1 — ...] 패턴
-  let idx = 0;
-  // 텍스트를 사진 마커 기준으로 쪼갠 뒤, 마커 위치에 사진/박스 삽입
+function renderBodyWithPhotos(text, urls, vurls){
+  vurls = vurls || [];
+  const re = /\[(📷|🎬)[^\]]*\]/g;        // 사진/영상 마커 모두
+  let im = 0, vi = 0;
   let html = '';
   let last = 0; let m;
   while((m = re.exec(text)) !== null){
     html += `<div style="white-space:pre-wrap">${escapeHtml(text.slice(last, m.index))}</div>`;
-    const url = urls[idx];
-    if(url){
-      html += `<img src="${url}" style="width:100%;max-height:340px;object-fit:cover;border-radius:10px;margin:12px 0"/>`;
+    if(m[1]==='🎬'){
+      const u = vurls[vi++];
+      html += u
+        ? `<video src="${u}" controls preload="metadata" style="width:100%;max-height:360px;border-radius:10px;margin:12px 0"></video>`
+        : `<div style="border:2px dashed #ccc;border-radius:10px;padding:34px 12px;text-align:center;color:#aaa;margin:12px 0;font-size:13px">🎬 ${escapeHtml(m[0].replace(/[\[\]]/g,''))}<br><span style="font-size:12px">여기에 영상이 들어갑니다 — 영상을 첨부하세요</span></div>`;
     }else{
-      html += `<div style="border:2px dashed #ccc;border-radius:10px;padding:34px 12px;text-align:center;
-        color:#aaa;margin:12px 0;font-size:13px">📷 ${escapeHtml(m[0].replace(/[\[\]]/g,''))}<br><span style="font-size:12px">여기에 사진이 들어갑니다 — 사진을 올리거나 'AI 그림'으로 채우세요</span></div>`;
+      const u = urls[im++];
+      html += u
+        ? `<img src="${u}" style="width:100%;max-height:340px;object-fit:cover;border-radius:10px;margin:12px 0"/>`
+        : `<div style="border:2px dashed #ccc;border-radius:10px;padding:34px 12px;text-align:center;color:#aaa;margin:12px 0;font-size:13px">📷 ${escapeHtml(m[0].replace(/[\[\]]/g,''))}<br><span style="font-size:12px">여기에 사진이 들어갑니다 — 사진을 올리거나 'AI 그림'으로 채우세요</span></div>`;
     }
-    idx++; last = m.index + m[0].length;
+    last = m.index + m[0].length;
   }
   html += `<div style="white-space:pre-wrap">${escapeHtml(text.slice(last))}</div>`;
-  // 본문에 사진 마커가 하나도 없는데 사진이 있으면 맨 위에 한 장
-  if(idx===0 && urls.length){ html = imgStrip(urls.slice(0,1),200) + html; }
+  // 마커가 하나도 없는데 미디어가 있으면 맨 위에 사진 1장 / 영상 1개
+  if(im===0 && vi===0){
+    if(urls.length) html = imgStrip(urls.slice(0,1),200) + html;
+    if(vurls.length) html = `<video src="${vurls[0]}" controls preload="metadata" style="width:100%;max-height:360px;border-radius:10px;margin:0 0 12px"></video>` + html;
+  }
   return html;
 }
 function openPreview(ch, text){
@@ -843,12 +863,15 @@ function openPreview(ch, text){
   let inner;
 
   if(ch.id==='instagram'){
-    const main = urls[0];
+    const main = urls[0]; const vid = previewVideos(ch)[0];
+    const mediaHtml = main ? `<img src="${main}" style="width:100%;display:block"/>`
+      : vid ? `<video src="${vid}" controls preload="metadata" style="width:100%;display:block"></video>`
+      : `<div style="aspect-ratio:1;display:flex;align-items:center;justify-content:center;background:#f0f0f0;color:#999;font-size:13px">사진/영상 자리 — 첨부하거나 'AI 그림'으로 채우세요</div>`;
     inner = `<div style="max-width:380px;margin:0 auto;background:#fff;color:#111;border:1px solid #ddd;border-radius:10px;overflow:hidden">
       <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;font-weight:600;font-size:13px">
         <span style="width:28px;height:28px;border-radius:50%;background:linear-gradient(45deg,#f09433,#dc2743,#bc1888);display:inline-block"></span>hanbyul_system</div>
-      ${ main ? `<img src="${main}" style="width:100%;display:block"/>` : `<div style="aspect-ratio:1;display:flex;align-items:center;justify-content:center;background:#f0f0f0;color:#999;font-size:13px">사진 자리 — 아래 'AI 그림 넣기'로 채우세요</div>`}
-      <div style="padding:10px 12px;font-size:13px;white-space:pre-wrap;line-height:1.6">${escapeHtml(text.replace(/\[📷[^\]]*\]/g,'').trim())}</div>
+      ${mediaHtml}
+      <div style="padding:10px 12px;font-size:13px;white-space:pre-wrap;line-height:1.6">${escapeHtml(text.replace(/\[(📷|🎬)[^\]]*\]/g,'').trim())}</div>
     </div>`;
   } else if(ch.id==='youtube'){
     const thumb = urls[0];
@@ -858,7 +881,7 @@ function openPreview(ch, text){
                : `<div style="aspect-ratio:16/9;background:#000;border-radius:10px;display:flex;align-items:center;justify-content:center;color:#aaa">썸네일 자리 — 'AI 그림 넣기'</div>`}
       <div style="color:#111;background:#fff;padding:10px;border-radius:0 0 10px 10px">
         <div style="font-weight:700;font-size:15px;margin-bottom:6px">${escapeHtml(title.replace(/🎬|제목:/g,'').trim())}</div>
-        <div style="font-size:12px;color:#555;white-space:pre-wrap;line-height:1.6">${escapeHtml(text.replace(/\[📷[^\]]*\]/g,'').trim())}</div></div>
+        <div style="font-size:12px;color:#555;white-space:pre-wrap;line-height:1.6">${escapeHtml(text.replace(/\[(📷|🎬)[^\]]*\]/g,'').trim())}</div></div>
     </div>`;
   } else {
     // 블로그(네이버/구글)/페북/쓰레드: 종이형 + 본문 [📷 사진N] 자리에 실제 사진 삽입
@@ -867,7 +890,7 @@ function openPreview(ch, text){
     const rest = lines.slice(1).join('\n');
     inner = `<div class="preview-paper">
       <div style="font-size:18px;font-weight:700;margin-bottom:14px">${escapeHtml(title)}</div>
-      ${renderBodyWithPhotos(rest, urls)}
+      ${renderBodyWithPhotos(rest, urls, previewVideos(ch))}
     </div>`;
   }
 
@@ -1043,8 +1066,6 @@ async function uploadCurrentMedia(apiBase){
   return out;   // [{url}] — 첨부한 사진 전부
 }
 
-// 대기열에서 복원된 영상 URL (발행·ZIP 에 사용)
-let mediaVideoURLs = [];
 // 첨부 영상을 Storage 에 직접 업로드(서명 URL) → URL 배열. 영상 전부 사용.
 async function uploadCurrentVideos(apiBase){
   const vids = media.filter(f=>f.type.startsWith('video/'));
@@ -1054,8 +1075,8 @@ async function uploadCurrentVideos(apiBase){
   const sd = await sign.json(); if(!sign.ok||!sd.ok) throw new Error(sd.error||'영상 업로드 URL 발급 실패');
   const out=[];
   for(let i=0;i<vids.length;i++){
-    const put=await fetch(sd.items[i].uploadUrl,{method:'PUT',headers:{'Content-Type':vids[i].type||'video/mp4','x-upsert':'true'},body:vids[i]});
-    if(!put.ok) throw new Error('영상 업로드 실패 ('+put.status+')');
+    const put=await fetch(sd.items[i].uploadUrl,{method:'PUT',headers:{'Content-Type':vids[i].type||'video/mp4'},body:vids[i]});
+    if(!put.ok){ const t=await put.text().catch(()=>''); throw new Error('영상 업로드 실패 ('+put.status+') '+t.slice(0,120)); }
     out.push({url:sd.items[i].publicUrl});
   }
   return out;   // [{url}] — 첨부한 영상 전부
