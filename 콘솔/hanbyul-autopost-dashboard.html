@@ -1082,6 +1082,16 @@ async function uploadCurrentVideos(apiBase){
   return out;   // [{url}] — 첨부한 영상 전부
 }
 
+// 발행용 미디어 URL: 첨부가 있으면 업로드, 없으면 대기열에서 복원된 URL
+async function currentMediaUrls(apiBase){
+  let imgs, vids;
+  if(media.filter(f=>f.type.startsWith('image/')).length) imgs=(await uploadCurrentMedia(apiBase)).map(i=>i.url);
+  else imgs=mediaImageURLs.filter(u=>/^https?:/.test(u));
+  if(media.filter(f=>f.type.startsWith('video/')).length) vids=(await uploadCurrentVideos(apiBase)).map(v=>v.url);
+  else vids=mediaVideoURLs.filter(u=>/^https?:/.test(u));
+  return {imgs, vids};
+}
+
 // 본문의 [📷 사진 N — 캡션] 에서 캡션만 뽑아 파일명에 사용 (순서 매칭)
 function markerCaptions(t){
   const out=[]; const re=/\[📷[^\]]*\]/g; let m;
@@ -1342,6 +1352,37 @@ async function publishNow(ch, text){
       window.open(videoUrl, '_blank');
     } catch (e) {
       alert('❌ 유튜브 영상 업로드 실패\n' + (e.message || e) + '\n\n해결 단서:\n- 채널 연결 박스에서 "구글 계정으로 연결" 을 한 번 더 눌러 YouTube 권한도 받았는지\n- Google Cloud Console 에서 YouTube Data API v3 가 활성화돼 있는지');
+    }
+    return;
+  }
+  if (ch.id === 'instagram' || ch.id === 'facebook' || ch.id === 'threads') {
+    const apiBase = qApiBase();
+    if(!apiBase){ alert('AI 백엔드 주소가 필요합니다.'); return; }
+    const caption = text.replace(/\[(📷|🎬)[^\]]*\]/g,'').trim();   // 마커 제거(SNS는 캡션만)
+    try {
+      const { imgs, vids } = await currentMediaUrls(apiBase);
+      if (ch.id === 'instagram' && imgs.length + vids.length === 0) { alert('인스타그램은 사진/영상이 1개 이상 필요합니다.'); return; }
+      const path = ch.id==='facebook' ? '/publish/facebook' : ch.id==='instagram' ? '/publish/instagram' : '/publish/threads';
+      const body = ch.id==='facebook' ? { message:caption, imageUrls:imgs, videoUrls:vids }
+                 : ch.id==='instagram' ? { caption, imageUrls:imgs, videoUrls:vids }
+                 : { text:caption, imageUrls:imgs, videoUrls:vids };
+      const r = await aiFetch(apiBase, path, { method:'POST', body: JSON.stringify(body) });
+      const d = await r.json().catch(()=>({ok:false,error:'응답 파싱 실패'}));
+      if (!r.ok || !d.ok) {
+        if ((d.error||'').includes('시크릿')) {   // 토큰 미설정 → 반자동 폴백
+          try { await navigator.clipboard.writeText(text); } catch(e){}
+          addToBoard(ch.id, makePost(ch, text, '임시'));
+          alert('🔑 '+ch.name+' 자동발행 토큰이 아직 없습니다.\n글을 클립보드에 복사했어요 — 우선 수동 발행하시고,\n토큰을 등록하면 다음부터 자동발행됩니다.');
+          return;
+        }
+        throw new Error(d.error || ('HTTP '+r.status));
+      }
+      addToBoard(ch.id, makePost(ch, text, '발행', { url: d.url }));
+      saveHistory(ch.id, text);
+      alert('✅ '+ch.name+' 발행 완료'+(d.url ? '\n'+d.url : ''));
+      if (d.url) window.open(d.url, '_blank');
+    } catch (e) {
+      alert('❌ '+ch.name+' 발행 실패\n'+(e.message||e));
     }
     return;
   }

@@ -647,6 +647,125 @@ async function queueSave(p: {
   return Array.isArray(inserted) ? inserted[0] : inserted;
 }
 
+// ──────────────────────────────────────────────
+// Meta(Instagram·Facebook) & Threads 발행
+// 토큰/ID 는 Supabase Secret. 미디어는 공개 Storage URL 사용(Meta 요구).
+// ──────────────────────────────────────────────
+const META_PAGE_ID    = Deno.env.get("META_PAGE_ID") || "";
+const META_PAGE_TOKEN = Deno.env.get("META_PAGE_TOKEN") || "";
+const META_IG_USER_ID = Deno.env.get("META_IG_USER_ID") || "";
+const THREADS_USER_ID = Deno.env.get("THREADS_USER_ID") || "";
+const THREADS_TOKEN   = Deno.env.get("THREADS_TOKEN") || "";
+const GRAPH = "https://graph.facebook.com/v21.0";
+const THREADS_API = "https://graph.threads.net/v1.0";
+
+async function gpost(url: string, params: Record<string, string>) {
+  const r = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(params).toString(),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok || d.error) throw new Error("Graph " + r.status + ": " + JSON.stringify(d.error || d).slice(0, 300));
+  return d;
+}
+async function gget(url: string) {
+  const r = await fetch(url);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok || d.error) throw new Error("Graph " + r.status + ": " + JSON.stringify(d.error || d).slice(0, 300));
+  return d;
+}
+// 영상/릴스 컨테이너 처리 완료 대기
+async function waitContainer(api: string, id: string, token: string) {
+  for (let i = 0; i < 40; i++) {
+    const d = await gget(`${api}/${id}?fields=status_code,status&access_token=${encodeURIComponent(token)}`);
+    if (d.status_code === "FINISHED") return;
+    if (d.status_code === "ERROR" || d.status_code === "EXPIRED") throw new Error("미디어 처리 실패: " + (d.status || d.status_code));
+    await new Promise((res) => setTimeout(res, 3000));
+  }
+  throw new Error("미디어 처리 시간 초과(영상이 너무 길거나 큼)");
+}
+
+async function publishFacebook(p: { message: string; imageUrls?: string[]; videoUrls?: string[] }) {
+  if (!META_PAGE_ID || !META_PAGE_TOKEN) throw new Error("META_PAGE_ID / META_PAGE_TOKEN 시크릿이 필요합니다.");
+  const imgs = p.imageUrls || [], vids = p.videoUrls || [];
+  let postId = "";
+  if (imgs.length) {
+    const attached: { media_fbid: string }[] = [];
+    for (const url of imgs) {
+      const d = await gpost(`${GRAPH}/${META_PAGE_ID}/photos`, { url, published: "false", access_token: META_PAGE_TOKEN });
+      attached.push({ media_fbid: d.id });
+    }
+    const d = await gpost(`${GRAPH}/${META_PAGE_ID}/feed`, { message: p.message, attached_media: JSON.stringify(attached), access_token: META_PAGE_TOKEN });
+    postId = d.id;
+  } else if (!vids.length) {
+    const d = await gpost(`${GRAPH}/${META_PAGE_ID}/feed`, { message: p.message, access_token: META_PAGE_TOKEN });
+    postId = d.id;
+  }
+  for (const file_url of vids) {
+    const d = await gpost(`${GRAPH}/${META_PAGE_ID}/videos`, { file_url, description: p.message, access_token: META_PAGE_TOKEN });
+    if (!postId) postId = d.id;
+  }
+  return { id: postId, url: `https://www.facebook.com/${postId || META_PAGE_ID}` };
+}
+
+async function publishInstagram(p: { caption: string; imageUrls?: string[]; videoUrls?: string[] }) {
+  if (!META_IG_USER_ID || !META_PAGE_TOKEN) throw new Error("META_IG_USER_ID / META_PAGE_TOKEN 시크릿이 필요합니다.");
+  const tok = META_PAGE_TOKEN, IG = META_IG_USER_ID;
+  const imgs = p.imageUrls || [], vids = p.videoUrls || [];
+  if (imgs.length + vids.length === 0) throw new Error("인스타그램은 사진/영상이 1개 이상 필요합니다.");
+  let creationId = "";
+  if (imgs.length + vids.length === 1) {
+    if (imgs.length) {
+      creationId = (await gpost(`${GRAPH}/${IG}/media`, { image_url: imgs[0], caption: p.caption, access_token: tok })).id;
+    } else {
+      creationId = (await gpost(`${GRAPH}/${IG}/media`, { media_type: "REELS", video_url: vids[0], caption: p.caption, access_token: tok })).id;
+      await waitContainer(GRAPH, creationId, tok);
+    }
+  } else {
+    const children: string[] = [];
+    for (const image_url of imgs.slice(0, 10)) {
+      children.push((await gpost(`${GRAPH}/${IG}/media`, { image_url, is_carousel_item: "true", access_token: tok })).id);
+    }
+    for (const video_url of vids.slice(0, Math.max(0, 10 - children.length))) {
+      const cid = (await gpost(`${GRAPH}/${IG}/media`, { media_type: "VIDEO", video_url, is_carousel_item: "true", access_token: tok })).id;
+      await waitContainer(GRAPH, cid, tok);
+      children.push(cid);
+    }
+    creationId = (await gpost(`${GRAPH}/${IG}/media`, { media_type: "CAROUSEL", children: children.join(","), caption: p.caption, access_token: tok })).id;
+  }
+  const pub = await gpost(`${GRAPH}/${IG}/media_publish`, { creation_id: creationId, access_token: tok });
+  return { id: pub.id, url: "https://www.instagram.com/" };
+}
+
+async function publishThreads(p: { text: string; imageUrls?: string[]; videoUrls?: string[] }) {
+  if (!THREADS_USER_ID || !THREADS_TOKEN) throw new Error("THREADS_USER_ID / THREADS_TOKEN 시크릿이 필요합니다.");
+  const TID = THREADS_USER_ID, tok = THREADS_TOKEN;
+  const imgs = p.imageUrls || [], vids = p.videoUrls || [];
+  let creationId = "";
+  if (imgs.length + vids.length <= 1) {
+    const params: Record<string, string> = { text: p.text, access_token: tok };
+    if (imgs.length) { params.media_type = "IMAGE"; params.image_url = imgs[0]; }
+    else if (vids.length) { params.media_type = "VIDEO"; params.video_url = vids[0]; }
+    else params.media_type = "TEXT";
+    creationId = (await gpost(`${THREADS_API}/${TID}/threads`, params)).id;
+    if (vids.length) await waitContainer(THREADS_API, creationId, tok);
+  } else {
+    const children: string[] = [];
+    for (const image_url of imgs) {
+      children.push((await gpost(`${THREADS_API}/${TID}/threads`, { media_type: "IMAGE", image_url, is_carousel_item: "true", access_token: tok })).id);
+    }
+    for (const video_url of vids) {
+      const cid = (await gpost(`${THREADS_API}/${TID}/threads`, { media_type: "VIDEO", video_url, is_carousel_item: "true", access_token: tok })).id;
+      await waitContainer(THREADS_API, cid, tok);
+      children.push(cid);
+    }
+    creationId = (await gpost(`${THREADS_API}/${TID}/threads`, { media_type: "CAROUSEL", children: children.join(","), text: p.text, access_token: tok })).id;
+  }
+  const pub = await gpost(`${THREADS_API}/${TID}/threads_publish`, { creation_id: creationId, access_token: tok });
+  return { id: pub.id, url: "https://www.threads.net/" };
+}
+
 function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": ALLOW_ORIGIN,
@@ -691,6 +810,9 @@ Deno.serve(async (req: Request) => {
             // configured 는 클라이언트가 있고 refresh_token 도 있는지 정도만.
             configured: !!(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET && GOOGLE_REFRESH_TOKEN),
           },
+          facebook: { configured: !!(META_PAGE_ID && META_PAGE_TOKEN) },
+          instagram: { configured: !!(META_IG_USER_ID && META_PAGE_TOKEN) },
+          threads: { configured: !!(THREADS_USER_ID && THREADS_TOKEN) },
         },
       });
     }
@@ -770,6 +892,22 @@ Deno.serve(async (req: Request) => {
         videos: p.videos,
       });
       return jsonResponse(200, { ok: true, ...out });
+    }
+
+    if (req.method === "POST" && sub === "/publish/facebook") {
+      const p = await req.json() as { message?: string; imageUrls?: string[]; videoUrls?: string[] };
+      if (!p.message && !(p.imageUrls?.length) && !(p.videoUrls?.length)) return jsonResponse(400, { ok: false, error: "내용이 비었습니다." });
+      return jsonResponse(200, { ok: true, ...(await publishFacebook({ message: p.message || "", imageUrls: p.imageUrls, videoUrls: p.videoUrls })) });
+    }
+
+    if (req.method === "POST" && sub === "/publish/instagram") {
+      const p = await req.json() as { caption?: string; imageUrls?: string[]; videoUrls?: string[] };
+      return jsonResponse(200, { ok: true, ...(await publishInstagram({ caption: p.caption || "", imageUrls: p.imageUrls, videoUrls: p.videoUrls })) });
+    }
+
+    if (req.method === "POST" && sub === "/publish/threads") {
+      const p = await req.json() as { text?: string; imageUrls?: string[]; videoUrls?: string[] };
+      return jsonResponse(200, { ok: true, ...(await publishThreads({ text: p.text || "", imageUrls: p.imageUrls, videoUrls: p.videoUrls })) });
     }
 
     // ── 대기열 파이프라인 ──
