@@ -179,8 +179,35 @@ ${kwBlock}
 위 입력값과 채널 지침에 따라, 바로 발행 가능한 완성된 글 1편을 한국어로 작성하세요. 설명이나 머리말 없이 본문만 출력하세요.`;
 }
 
-async function callClaude(prompt: string) {
+// ── 모델 라이트사이징(비용 절감) ─────────────────────────────
+// 채널별로 필요한 만큼만: 블로그(긴 글·SEO)는 품질 유지, 짧은 채널은 저가 모델.
+// 단가는 백만 토큰당 USD. sonnet-5 는 2026-08-31 까지 인트로가($2/$10)라 구 sonnet-4-5($3/$15)보다 쌈.
+// 특정 채널 품질이 아쉬우면 그 채널만 CHANNEL_MODEL 에서 sonnet-5 로 올리면 됨.
+const MODEL_PRICING: Record<string, { in: number; out: number; noThink: boolean }> = {
+  "claude-sonnet-5":  { in: 2, out: 10, noThink: true },  // sonnet-5는 thinking 기본 ON → 콘텐츠 생성엔 꺼서 토큰 절약
+  "claude-haiku-4-5": { in: 1, out: 5,  noThink: false },
+};
+const CHANNEL_MODEL: Record<string, string> = {
+  naver:     "claude-sonnet-5",   // 긴 블로그·검색 유입 → 품질 유지
+  google:    "claude-sonnet-5",   // 긴 블로그·SEO → 품질 유지
+  youtube:   "claude-haiku-4-5",  // 제목·설명·태그
+  instagram: "claude-haiku-4-5",  // 짧은 글
+  threads:   "claude-haiku-4-5",  // 500자 이내
+  facebook:  "claude-haiku-4-5",  // 중간 길이 스토리
+};
+function modelForChannel(channel?: string): string {
+  return (channel && CHANNEL_MODEL[channel]) || "claude-sonnet-5";
+}
+
+async function callClaude(prompt: string, model = "claude-sonnet-5") {
   if (!ANTHROPIC_KEY) throw new Error("ANTHROPIC_API_KEY 시크릿이 설정되지 않았습니다.");
+  const cfg = MODEL_PRICING[model] || MODEL_PRICING["claude-sonnet-5"];
+  const body: Record<string, unknown> = {
+    model,
+    max_tokens: 8000,
+    messages: [{ role: "user", content: prompt }],
+  };
+  if (cfg.noThink) body.thinking = { type: "disabled" };  // 생성 태스크는 사고 토큰 불필요
   const r = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -188,20 +215,16 @@ async function callClaude(prompt: string) {
       "x-api-key": ANTHROPIC_KEY,
       "anthropic-version": "2023-06-01",
     },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-5",
-      max_tokens: 8000,
-      messages: [{ role: "user", content: prompt }],
-    }),
+    body: JSON.stringify(body),
   });
   if (!r.ok) throw new Error("Anthropic " + r.status + ": " + (await r.text()).slice(0, 200));
   const d = await r.json();
   const u = d.usage || {};
   const inTok = u.input_tokens || 0, outTok = u.output_tokens || 0;
-  const usd = (inTok / 1e6) * 3 + (outTok / 1e6) * 15;
+  const usd = (inTok / 1e6) * cfg.in + (outTok / 1e6) * cfg.out;
   return {
     text: d.content.map((c: { text: string }) => c.text).join(""),
-    usage: { model: "claude-sonnet-4-5", input_tokens: inTok, output_tokens: outTok, usd: +usd.toFixed(5) },
+    usage: { model, input_tokens: inTok, output_tokens: outTok, usd: +usd.toFixed(5) },
   };
 }
 
@@ -225,12 +248,12 @@ async function analyzeImages(images: { media_type?: string; data: string }[]) {
   const r = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "content-type": "application/json", "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01" },
-    body: JSON.stringify({ model: "claude-sonnet-4-5", max_tokens: 800, messages: [{ role: "user", content }] }),
+    body: JSON.stringify({ model: "claude-sonnet-5", max_tokens: 800, thinking: { type: "disabled" }, messages: [{ role: "user", content }] }),
   });
   if (!r.ok) throw new Error("Vision " + r.status + ": " + (await r.text()).slice(0, 200));
   const d = await r.json();
   const u = d.usage || {};
-  const usd = ((u.input_tokens || 0) / 1e6) * 3 + ((u.output_tokens || 0) / 1e6) * 15;
+  const usd = ((u.input_tokens || 0) / 1e6) * 2 + ((u.output_tokens || 0) / 1e6) * 10;
   return {
     desc: d.content.map((c: { text: string }) => c.text).join(""),
     usage: { usd: +usd.toFixed(5), input_tokens: u.input_tokens || 0, output_tokens: u.output_tokens || 0 },
@@ -531,7 +554,7 @@ async function queueGenerate(p: QueueGenInput) {
       imageDesc: p.image_desc,
       imageCount: p.image_count,
       videoCount: p.video_count,
-    }));
+    }), modelForChannel(ch));
     out[ch] = { text: res.text, usage: res.usage };
     totalUsd += res.usage.usd;
   }
@@ -549,6 +572,122 @@ async function queueGenerate(p: QueueGenInput) {
   };
   const inserted = await sbRest("POST", "autopost_post_queue", row, { Prefer: "return=representation" });
   return Array.isArray(inserted) ? inserted[0] : inserted;
+}
+
+// ── Batch API (−50%): 소재 → 요청 채널 한 번에 배치 제출 → 나중에 수집 ──
+// 인터랙티브 /generate 는 그대로 두고, "나중에 받아도 되는" 저렴 경로만 추가.
+async function submitBatch(requests: { custom_id: string; params: Record<string, unknown> }[]) {
+  if (!ANTHROPIC_KEY) throw new Error("ANTHROPIC_API_KEY 시크릿이 필요합니다.");
+  const r = await fetch("https://api.anthropic.com/v1/messages/batches", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01" },
+    body: JSON.stringify({ requests }),
+  });
+  if (!r.ok) throw new Error("Batch create " + r.status + ": " + (await r.text()).slice(0, 300));
+  return await r.json() as { id: string; processing_status?: string };
+}
+
+// 소재 1건 → 요청 채널들 배치 제출 → generating 으로 적재.
+// batch id 는 channels._pending_batch 에 임시 보관(스키마 변경 불필요). 수집 시 실제 채널 내용으로 덮어씀.
+async function queueGenerateBatch(p: QueueGenInput & { images?: { url: string; caption?: string }[]; videos?: { url: string; caption?: string }[] }) {
+  const channels = (p.channels && p.channels.length ? p.channels : Object.keys(CHANNEL_AGENTS))
+    .filter((c) => CHANNEL_AGENTS[c]);
+  if (!channels.length) throw new Error("유효한 채널이 없습니다.");
+
+  const requests = channels.map((ch) => {
+    const model = modelForChannel(ch);
+    const cfg = MODEL_PRICING[model] || MODEL_PRICING["claude-sonnet-5"];
+    const params: Record<string, unknown> = {
+      model,
+      max_tokens: 8000,
+      messages: [{
+        role: "user",
+        content: buildPrompt({
+          channel: ch, seed: p.raw_context, kw: p.kw, region: p.region,
+          model: p.model, service: p.service, pain: p.pain, solution: p.solution,
+          postType: p.post_type, imageDesc: p.image_desc,
+          imageCount: p.image_count, videoCount: p.video_count,
+        }),
+      }],
+    };
+    if (cfg.noThink) params.thinking = { type: "disabled" };
+    return { custom_id: ch, params };
+  });
+
+  const batch = await submitBatch(requests);
+
+  const row = {
+    topic: p.topic,
+    raw_context: p.raw_context || "",
+    region: p.region || null,
+    post_type: p.post_type || null,
+    image_desc: p.image_desc || null,
+    image_count: p.image_count || 0,
+    channels: { _pending_batch: batch.id },
+    images: p.images || [],
+    videos: p.videos || [],
+    status: "generating",
+    total_usd: 0,
+  };
+  const inserted = await sbRest("POST", "autopost_post_queue", row, { Prefer: "return=representation" });
+  return Array.isArray(inserted) ? inserted[0] : inserted;
+}
+
+// generating 대기열 훑어 끝난 배치 결과 조립 → pending 승격. 콘솔이 대기열 열 때마다 호출(=폴링).
+async function collectBatches() {
+  if (!ANTHROPIC_KEY) throw new Error("ANTHROPIC_API_KEY 시크릿이 필요합니다.");
+  const rows = (await sbRest("GET", "autopost_post_queue?status=eq.generating&order=created_at.asc")) || [];
+  let collected = 0, running = 0;
+  for (const row of rows) {
+    try {
+      const batchId = row?.channels?._pending_batch;
+      if (!batchId) continue;
+      const sr = await fetch(`https://api.anthropic.com/v1/messages/batches/${batchId}`, {
+        headers: { "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01" },
+      });
+      if (!sr.ok) { running++; continue; }
+      const b = await sr.json();
+      if (b.processing_status !== "ended" || !b.results_url) { running++; continue; }
+      const rr = await fetch(b.results_url, {
+        headers: { "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01" },
+      });
+      if (!rr.ok) { running++; continue; }
+      const jsonl = await rr.text();
+      const out: Record<string, unknown> = {};
+      let totalUsd = 0;
+      for (const line of jsonl.split("\n")) {
+        const t = line.trim();
+        if (!t) continue;
+        let rec: { custom_id?: string; result?: { type?: string; message?: { content?: { text?: string }[]; usage?: { input_tokens?: number; output_tokens?: number }; model?: string } } };
+        try { rec = JSON.parse(t); } catch { continue; }
+        const ch = rec.custom_id;
+        const res = rec.result;
+        if (!ch) continue;
+        if (res?.type === "succeeded" && res.message) {
+          const msg = res.message;
+          const text = (msg.content || []).map((c) => c.text || "").join("");
+          const u = msg.usage || {};
+          const priceModel = modelForChannel(ch);  // 단가는 요청한 별칭 기준(응답 model 은 날짜 붙은 풀 ID라 맵에 없음)
+          const cfg = MODEL_PRICING[priceModel] || MODEL_PRICING["claude-sonnet-5"];
+          const model = msg.model || priceModel;    // 표시는 실제 응답 모델
+          const usd = ((u.input_tokens || 0) / 1e6 * cfg.in + (u.output_tokens || 0) / 1e6 * cfg.out) * 0.5; // 배치 −50%
+          out[ch] = { text, usage: { model, input_tokens: u.input_tokens || 0, output_tokens: u.output_tokens || 0, usd: +usd.toFixed(5) } };
+          totalUsd += usd;
+        } else {
+          out[ch] = { text: "", usage: { model: modelForChannel(ch), input_tokens: 0, output_tokens: 0, usd: 0 }, error: String(res?.type || "failed") };
+        }
+      }
+      await sbRest("PATCH", `autopost_post_queue?id=eq.${row.id}`, {
+        channels: out,
+        status: "pending",
+        total_usd: +totalUsd.toFixed(5),
+      });
+      collected++;
+    } catch (_e) {
+      running++;
+    }
+  }
+  return { collected, running, checked: rows.length };
 }
 
 async function queueList(status?: string) {
@@ -819,7 +958,7 @@ Deno.serve(async (req: Request) => {
 
     if (req.method === "POST" && sub === "/generate") {
       const p = await req.json() as GenInput;
-      const result = await callClaude(buildPrompt(p));
+      const result = await callClaude(buildPrompt(p), modelForChannel(p.channel));
       return jsonResponse(200, { ok: true, channel: p.channel, text: result.text, usage: result.usage });
     }
 
@@ -916,6 +1055,19 @@ Deno.serve(async (req: Request) => {
       if (!p.topic) return jsonResponse(400, { ok: false, error: "topic 필요" });
       const post = await queueGenerate(p);
       return jsonResponse(200, { ok: true, post });
+    }
+
+    // 배치 생성(−50%): 소재 → 요청 채널 한 번에 제출 → generating 적재
+    if (req.method === "POST" && sub === "/queue/generate-batch") {
+      const p = await req.json() as QueueGenInput;
+      if (!p.topic) return jsonResponse(400, { ok: false, error: "topic 필요" });
+      const post = await queueGenerateBatch(p);
+      return jsonResponse(200, { ok: true, post });
+    }
+
+    // 배치 수집: 끝난 generating 항목을 pending 으로 승격(콘솔이 대기열 열 때마다 호출)
+    if (req.method === "POST" && sub === "/queue/collect") {
+      return jsonResponse(200, { ok: true, ...(await collectBatches()) });
     }
 
     if (req.method === "GET" && sub === "/queue") {

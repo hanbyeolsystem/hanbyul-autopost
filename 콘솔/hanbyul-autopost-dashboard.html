@@ -98,6 +98,27 @@
   .tabbar .tb.on{background:var(--accent);color:#fff;border-color:var(--accent)}
   .note{background:#10233a;border:1px solid #1e3a5f;color:#9cc4ef;padding:10px 12px;
     border-radius:10px;font-size:12px;margin-top:14px}
+  /* ── 휴대폰(≤680px) ── PC와 같은 기능을 손가락으로 쓸 수 있게 */
+  @media(max-width:680px){
+    header{padding:12px 14px;flex-wrap:wrap;gap:10px}
+    header h1{font-size:15px}
+    header .tag{display:none}                       /* 좁은 화면에선 설명줄 숨김 */
+    .logo{width:34px;height:34px;font-size:15px}
+    .wrap{min-height:auto}
+    .left,.right{padding:14px}
+    /* iOS 는 글꼴 16px 미만 입력창을 탭하면 화면을 확대해버린다 → 전부 16px */
+    textarea,input,select{font-size:16px;padding:12px}
+    textarea{min-height:84px}
+    .row{flex-direction:column;gap:0}               /* 2단 입력 → 세로 쌓기 */
+    .btn{padding:15px;font-size:16px}
+    .mini{padding:11px 13px;font-size:13px}         /* 손가락 터치 영역 확보 */
+    .card .foot{flex-wrap:wrap}
+    .card .foot .mini{flex:1 1 auto}
+    .modal-bg{padding:0;align-items:flex-end}
+    .modal{max-width:none;border-radius:14px 14px 0 0;max-height:92vh}
+    .tabbar{overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch}
+    .tabbar .tb{flex:0 0 auto}
+  }
 </style>
 </head>
 <body>
@@ -108,6 +129,7 @@
     <div class="tag">사진·영상·기본문구 → AI 채널별 맞춤 글 생성 → 검토 → 발행 대기열 · 한별시스템</div>
   </div>
   <div style="margin-left:auto;text-align:right;font-size:12px;color:var(--sub)">
+    <div style="margin-bottom:3px">서버 <span id="netBadge" class="badge wait">확인 중…</span></div>
     <div>이번 생성 비용: <b id="costNow" style="color:var(--accent2)">$0.0000</b></div>
     <div>누적 사용: <b id="costTotal" style="color:var(--ink)">$0.0000</b> <span style="cursor:pointer;text-decoration:underline" id="costReset">초기화</span></div>
   </div>
@@ -182,11 +204,19 @@
     <h2 style="margin-top:22px">2. 생성</h2>
     <button class="btn" id="gen">📝 채널 카드 만들기</button>
     <button class="mini" id="genAll" style="margin-top:8px">⚡ 선택 채널 전체 생성(토큰 더 듦)</button>
-    <div class="note" style="margin-top:6px">카드를 만든 뒤 각 채널의 <b>🤖 AI 생성</b>을 눌러 <b>하나씩</b> 만드세요(토큰 절약). 전체가 필요할 때만 위 '전체 생성'.</div>
+    <button class="mini" id="genBatch" style="margin-top:8px">💰 배치 생성(−50%, 나중에 수집)</button>
+    <div class="note" style="margin-top:6px">카드를 만든 뒤 각 채널의 <b>🤖 AI 생성</b>을 눌러 <b>하나씩</b> 만드세요(토큰 절약). 전체가 필요할 때만 '전체 생성'.<br><b>💰 배치 생성</b>: 요금 절반. 대신 즉시 안 나오고 <b>대기열에 '⏳ 생성 중'</b>으로 담겼다가 몇 분 뒤 대기열을 새로고침하면 완성됩니다.</div>
     <div class="typing" id="typing">AI가 채널별 맞춤 글을 작성 중…</div>
     <div class="note" id="enginenote">기본값은 한별 Supabase Edge Function입니다. 비우면 무료 공식으로 폴백, 다른 백엔드 쓰려면 주소만 바꾸세요.</div>
     <label style="margin-top:10px">AI 백엔드 주소 (Supabase Edge Function · 자동 저장)</label>
     <input id="apiBase" value="https://jrzesjgyrvgvwazfajec.supabase.co/functions/v1/hanbyul-autopost-ai" placeholder="예) https://...supabase.co/functions/v1/hanbyul-autopost-ai" />
+    <div style="display:flex;gap:6px;margin-top:8px">
+      <button class="mini" id="netCheck" style="flex:1">🔌 연결 확인</button>
+      <button class="mini" id="netReset" style="flex:1">↺ 주소 초기화</button>
+    </div>
+    <div id="netDiag" style="display:none;font-size:12px;background:var(--panel2);border:1px solid var(--line);
+      border-radius:8px;padding:9px 11px;margin-top:8px;white-space:pre-wrap;word-break:break-all;
+      font-family:var(--mono)"></div>
 
     <h2 style="margin-top:24px">3. 채널 연결</h2>
     <div id="connectGoogle" style="background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;font-size:13px">
@@ -315,32 +345,89 @@ CHANNELS.forEach(c=>{
 
 // ── AI 백엔드 주소 자동 기억 (한 번만 입력하면 다음부터 자동) ──
 const apiBaseEl = document.getElementById('apiBase');
+const DEFAULT_API_BASE = apiBaseEl.value.trim();   // HTML 에 박힌 정상 백엔드 주소
 try{
-  let saved = localStorage.getItem('hanbyul_apiBase');
-  // 옛 NAS·localhost 기본값은 무시 (Supabase Edge Function로 마이그레이션)
-  if(saved && /(^https?:\/\/(localhost|127\.|192\.168\.|10\.|172\.))/.test(saved)){ saved = ''; localStorage.removeItem('hanbyul_apiBase'); }
-  if(saved) apiBaseEl.value = saved;
+  let saved = (localStorage.getItem('hanbyul_apiBase')||'').trim();
+  // 저장값은 '올바른 Supabase 함수 주소'일 때만 인정. 옛 NAS·localhost·빈값·낡은 주소면 버리고 기본값으로 자동 복구.
+  const looksValid = /^https:\/\/[a-z0-9-]+\.supabase\.co\/functions\/v1\/hanbyul-autopost-ai\/?$/i.test(saved);
+  if(saved && !looksValid){ localStorage.removeItem('hanbyul_apiBase'); saved=''; }
+  apiBaseEl.value = looksValid ? saved : DEFAULT_API_BASE;
 }catch(e){}
-apiBaseEl.addEventListener('change', ()=>{
-  try{ localStorage.setItem('hanbyul_apiBase', apiBaseEl.value.trim()); }catch(e){}
-});
-apiBaseEl.addEventListener('blur', ()=>{
-  try{ localStorage.setItem('hanbyul_apiBase', apiBaseEl.value.trim()); }catch(e){}
-});
+// 저장은 '쓸 수 있는 주소'일 때만. 폰에서 실수로 지우거나 자동완성이 망가뜨린 값을 붙잡아두지 않는다.
+function persistApiBase(){
+  const v = apiBaseEl.value.trim();
+  try{
+    if(/^https:\/\/\S+$/i.test(v)) localStorage.setItem('hanbyul_apiBase', v);
+    else { localStorage.removeItem('hanbyul_apiBase'); apiBaseEl.value = DEFAULT_API_BASE; }
+  }catch(e){}
+}
+apiBaseEl.addEventListener('change', persistApiBase);
+apiBaseEl.addEventListener('blur', persistApiBase);
 
 // ── Supabase Edge Function 호출 헬퍼 ──
 // 백엔드 URL이 *.supabase.co 면 Authorization Bearer / apikey 헤더를 자동 부착.
 // (anon 키는 공개 키 — RLS와 verify_jwt 가 실제 게이트.)
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpyemVzamd5cnZndndhemZhamVjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc3MjgwMTksImV4cCI6MjA5MzMwNDAxOX0.6FAb0CUMuYVqsvWmUR8Bbvmph4MJjlQqSDi_Mkza1c0';
-function aiFetch(base, path, init){
-  const url = base.replace(/\/$/,'') + path;
+// 모바일(LTE·약한 와이파이)에선 요청이 응답 없이 매달리는 일이 잦다 → 타임아웃을 둔다.
+const AI_TIMEOUT_MS = 180000;   // AI 생성이 오래 걸리므로 넉넉히 3분
+async function aiFetch(base, path, init){
+  const url = (base||'').replace(/\/$/,'') + path;
   const headers = Object.assign({'Content-Type':'application/json'}, (init && init.headers) || {});
   if(/\.supabase\.co\//.test(url)){
     headers['Authorization'] = 'Bearer ' + SUPABASE_ANON_KEY;
     headers['apikey'] = SUPABASE_ANON_KEY;
   }
-  return fetch(url, Object.assign({}, init || {}, { headers }));
+  const ac = new AbortController();
+  const timer = setTimeout(()=>ac.abort(), AI_TIMEOUT_MS);
+  try{
+    return await fetch(url, Object.assign({}, init || {}, { headers, signal: ac.signal }));
+  }catch(e){
+    // 폰에는 개발자도구가 없다. 'Failed to fetch' 대신 원인·주소를 그대로 보여준다.
+    if(e.name === 'AbortError') throw new Error(`서버 응답 시간 초과(${AI_TIMEOUT_MS/1000}초)\n주소: ${url}\n네트워크가 느리거나 서버가 응답하지 않습니다.`);
+    throw new Error(`서버에 연결하지 못했습니다.\n주소: ${url}\n원인: ${e.message}\n(인터넷 연결 / 백엔드 주소를 확인하세요. 좌측 '🔌 연결 확인')`);
+  }finally{ clearTimeout(timer); }
 }
+
+// ── 연결 진단 (모바일 필수: 화면에 실제 오류를 찍어준다) ──
+const netBadgeEl = document.getElementById('netBadge');
+function setNetBadge(state, text){
+  if(!netBadgeEl) return;
+  netBadgeEl.textContent = text;
+  netBadgeEl.className = 'badge ' + (state==='ok' ? 'ok' : 'wait');
+}
+async function checkConnection(verbose){
+  const diag = document.getElementById('netDiag');
+  const base = document.getElementById('apiBase').value.trim();
+  const show = msg => { if(verbose && diag){ diag.style.display='block'; diag.textContent = msg; } };
+  if(!base){ setNetBadge('bad','주소 없음'); show('❌ 백엔드 주소가 비어 있습니다.\n"↺ 주소 초기화"를 누르세요.'); return false; }
+  setNetBadge('wait','확인 중…'); show('연결 확인 중…\n'+base);
+  const t0 = Date.now();
+  try{
+    const r = await aiFetch(base, '/health', { method:'GET' });
+    const body = await r.text();
+    if(!r.ok){
+      setNetBadge('bad','오류 '+r.status);
+      show(`❌ 서버가 HTTP ${r.status} 응답\n주소: ${base}\n응답: ${body.slice(0,300)}`);
+      return false;
+    }
+    const d = JSON.parse(body);
+    setNetBadge('ok','✓ 연결됨');
+    show(`✅ 연결 정상 (${Date.now()-t0}ms)\n주소: ${base}\nAI: ${d.ai||'-'} · 대기열: ${d.queue?'O':'X'} · 사진분석: ${d.vision?'O':'X'}`);
+    return true;
+  }catch(e){
+    setNetBadge('bad','연결 실패');
+    show('❌ '+e.message);
+    return false;
+  }
+}
+document.getElementById('netCheck').onclick = ()=>checkConnection(true);
+document.getElementById('netReset').onclick = ()=>{
+  // 폰/PC 어디서든 저장된 낡은 주소를 버리고 기본 백엔드로 되돌린다.
+  try{ localStorage.removeItem('hanbyul_apiBase'); }catch(e){}
+  document.getElementById('apiBase').value = DEFAULT_API_BASE;
+  checkConnection(true);
+};
+checkConnection(false);   // 페이지 열릴 때 조용히 1회 확인 → 헤더 배지로 표시
 
 const drop = document.getElementById('drop');
 const fileInput = document.getElementById('file');
@@ -733,6 +820,37 @@ document.getElementById('genAll').onclick = async ()=>{
   setTimeout(()=>{ typing.style.display='none'; }, 2500);
 };
 
+// 💰 배치 생성(−50%) — 요청 채널을 한 번에 배치 제출. 즉시 결과 X, 대기열에 '⏳ 생성 중'으로 담김.
+document.getElementById('genBatch').onclick = async ()=>{
+  const p = readGenInputs();
+  if(!p.seed.trim()){ alert('한 일 / 핵심 메시지를 입력해 주세요.'); return; }
+  if(!p.apiBase){ alert('배치 생성은 AI 백엔드(Supabase) 주소가 필요합니다.'); return; }
+  const selected = [...document.querySelectorAll('#channels input:checked')].map(i=>i.value);
+  if(!selected.length){ alert('채널을 1개 이상 선택해 주세요.'); return; }
+  if(!confirm(`${selected.length}개 채널을 배치로 생성합니다(요금 −50%).\n즉시 나오지 않고 대기열에 '⏳ 생성 중'으로 담겼다가, 몇 분 뒤 대기열을 새로고침하면 완성됩니다.\n계속할까요?`)) return;
+  const btn = document.getElementById('genBatch');
+  const orig = btn.textContent; btn.disabled = true; btn.textContent = '⏳ 미디어 업로드·제출 중…';
+  try{
+    let images=[], videos=[];
+    try{ images=await uploadCurrentMedia(p.apiBase); }catch(e){ /* 이미지 없거나 실패 시 무시 */ }
+    try{ videos=await uploadCurrentVideos(p.apiBase); }catch(e){ /* 영상 없거나 실패 시 무시 */ }
+    const body = {
+      topic: (p.seed||'').slice(0,200) || '배치 글',
+      raw_context: p.seed||'',
+      region: p.region||'', post_type: p.postType||'',
+      kw: p.kw||'', model: p.model||'', service: p.service||'',
+      pain: p.pain||'', solution: p.solution||'',
+      image_desc: p.imageDesc||'', image_count: p.imageCount||0, video_count: p.videoCount||0,
+      channels: selected, images, videos,
+    };
+    const r = await aiFetch(p.apiBase, '/queue/generate-batch', {method:'POST', body: JSON.stringify(body)});
+    const d = await r.json(); if(!r.ok||!d.ok) throw new Error(d.error||('HTTP '+r.status));
+    alert('✅ 배치 제출 완료 — 대기열에 "⏳ 생성 중"으로 담겼습니다.\n몇 분 뒤 대기열 탭을 새로고침하면 자동 수집되어 완성됩니다.');
+    showView('queue');
+  }catch(e){ alert('배치 제출 실패: '+e.message); }
+  finally{ btn.disabled=false; btn.textContent=orig; }
+};
+
 // 카드 껍데기 (head + body자리 + foot). 본문은 나중에 채움
 function makeCardShell(ch){
   const card = document.createElement('div');
@@ -1071,7 +1189,7 @@ function saveHistory(channel, text){
 
 // ── 발행 대기열 (Supabase DB 기반 — 폰·PC 어디서나 같은 대기열) ──
 const CH_BY_ID = Object.fromEntries(CHANNELS.map(c=>[c.id,c]));
-const STATUS_BADGE = {pending:'검토대기', approved:'승인됨', published:'발행완료', failed:'실패'};
+const STATUS_BADGE = {generating:'⏳ 생성 중', pending:'검토대기', approved:'승인됨', published:'발행완료', failed:'실패'};
 function qApiBase(){ return document.getElementById('apiBase').value.trim(); }
 
 // 첨부 사진을 Storage 에 올려 URL 배열 반환 (대기열이 사진을 들고 다니도록)
@@ -1195,6 +1313,8 @@ async function loadQueue(){
     return;
   }
   q.innerHTML='<div style="color:var(--sub);padding:12px">대기열 불러오는 중…</div>';
+  // 배치 생성('⏳ 생성 중') 항목 자동 수집 — 끝난 것만 pending 으로 승격. 실패해도 목록은 계속.
+  try{ await aiFetch(apiBase,'/queue/collect',{method:'POST',body:'{}'}); }catch(e){}
   let posts=[];
   try{
     const r=await aiFetch(apiBase,'/queue',{method:'GET'});
@@ -1208,7 +1328,7 @@ async function loadQueue(){
   empty.style.display=posts.length?'none':'block';
   q.innerHTML='';
   posts.forEach(p=>{
-    const chIds=Object.keys(p.channels||{});
+    const chIds=Object.keys(p.channels||{}).filter(id=>!id.startsWith('_'));
     const chips=chIds.map(id=>{const c=CH_BY_ID[id];return `<span class="dot" style="background:${c?c.color:'#888'}" title="${c?c.name:id}"></span>`;}).join('');
     const st=p.status||'pending';
     const created=(p.created_at||'').slice(5,16).replace('T',' ');
@@ -1221,12 +1341,12 @@ async function loadQueue(){
         <b style="flex:1;min-width:120px">${escapeHtml(p.topic||'')}</b>
         <span style="font-size:11px;color:var(--sub)">${created}${sched} · $${(p.total_usd||0)}</span>
       </div>
-      <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
-        <button class="mini" data-act="cards">↩ 카드로 불러오기</button>
+      <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        ${st==='generating'?'<span style="font-size:12px;color:var(--sub)">배치 생성 중 — 새로고침하면 자동 수집됩니다</span>':'<button class="mini" data-act="cards">↩ 카드로 불러오기</button>'}
         ${st==='pending'?'<button class="mini pub" data-act="approve">✓ 승인</button>':''}
         <button class="mini" data-act="del">✕ 삭제</button>
       </div>`;
-    el.querySelector('[data-act=cards]').onclick=()=>loadRowToCards(p);
+    const cb=el.querySelector('[data-act=cards]'); if(cb) cb.onclick=()=>loadRowToCards(p);
     const ap=el.querySelector('[data-act=approve]'); if(ap) ap.onclick=()=>queueAction('/queue/update',{id:p.id,status:'approved'});
     el.querySelector('[data-act=del]').onclick=()=>{ if(confirm('이 대기열 항목을 삭제할까요?')) queueAction('/queue/delete',{id:p.id}); };
     q.appendChild(el);
