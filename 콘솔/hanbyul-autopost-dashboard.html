@@ -140,8 +140,9 @@
     <h2>1. 소재 입력</h2>
 
     <label>미디어 (사진/영상)</label>
-    <div class="drop" id="drop">📷 클릭하거나 파일을 끌어다 놓으세요<br><span style="font-size:11px">jpg · png · mp4 등</span></div>
-    <input type="file" id="file" multiple accept="image/*,video/*" style="display:none" />
+    <div class="drop" id="drop">📷 클릭하거나 파일을 끌어다 놓으세요<br><span style="font-size:11px">jpg · png · mp4 등 (아이폰 사진은 JPG로 자동 변환)</span></div>
+    <!-- accept 에 heic 를 넣지 않아야 아이폰이 JPG 로 자동 변환해 올린다 (HEIC 원본은 웹에서 깨짐) -->
+    <input type="file" id="file" multiple accept="image/jpeg,image/png,image/gif,image/webp,video/*" style="display:none" />
     <div class="thumbs" id="thumbs"></div>
     <button class="mini" id="analyzeBtn" style="margin-top:8px;display:none">🔍 사진 분석 (글과 일치 검증)</button>
     <div id="imgDesc" style="display:none;font-size:12px;background:#0e1b14;border:1px solid #1d3a2a;
@@ -441,8 +442,33 @@ let mediaImageURLs = [];   // 업로드한 사진 미리보기용 URL
 let mediaVideoURLs = [];   // 업로드/복원한 영상 URL (미리보기·발행·ZIP)
 let cardImages = {};       // 채널별 AI 생성 이미지 URL (미리보기에 사용)
 let cardVideos = {};       // 채널별 AI 생성 영상 URL (게시판/미리보기에 사용)
-function handleFiles(files){
-  [...files].forEach(f=>{
+// 아이폰 HEIC 감지 — accept 에서 heic 를 빼면 아이폰이 JPG 로 자동 변환해 주지만,
+// 드래그·구형 iOS 등으로 원본 HEIC 가 들어오는 경우를 매직바이트로 이중 차단.
+async function isHeicFile(f){
+  const name=((f&&f.name)||'').toLowerCase(), type=((f&&f.type)||'').toLowerCase();
+  if(/\.(heic|heif)$/.test(name) || type==='image/heic' || type==='image/heif') return true;
+  try{
+    const buf=new Uint8Array(await f.slice(0,24).arrayBuffer());
+    let s=''; for(let i=4;i<buf.length;i++) s+=String.fromCharCode(buf[i]);
+    if(s.slice(0,4)==='ftyp' && ['heic','heix','hevc','hevx','heim','heis','hevm','hevs','mif1','msf1'].indexOf(s.slice(4,8))>=0) return true;
+  }catch(e){}
+  return false;
+}
+
+async function handleFiles(files){
+  const rejected=[];
+  for(const f of [...files]){
+    if(await isHeicFile(f)){ rejected.push(f.name); continue; }
+    addMediaFile(f);
+  }
+  if(rejected.length){
+    alert("아이폰 HEIC 사진은 웹·발행 채널에서 표시되지 않아 사용할 수 없습니다:\n- "+rejected.join('\n- ')+
+      "\n\n아이폰 설정 > 카메라 > 포맷을 '높은 호환성'으로 바꾸거나, 사진을 JPG로 변환 후 다시 선택해 주세요.");
+  }
+  // 이미지가 하나라도 있으면 '사진 분석' 버튼 노출
+  if(media.some(m=>m.type.startsWith('image/'))) document.getElementById('analyzeBtn').style.display='inline-block';
+}
+function addMediaFile(f){
     media.push(f);
     if(f.type.startsWith('image/')){
       const url=URL.createObjectURL(f);
@@ -459,9 +485,6 @@ function handleFiles(files){
       const d=document.createElement('div');d.className='file';
       d.textContent='📎 '+f.name.slice(0,14);thumbs.appendChild(d);
     }
-  });
-  // 이미지가 하나라도 있으면 '사진 분석' 버튼 노출
-  if(media.some(m=>m.type.startsWith('image/'))) document.getElementById('analyzeBtn').style.display='inline-block';
 }
 
 // 파일 → base64 (이미지만)
