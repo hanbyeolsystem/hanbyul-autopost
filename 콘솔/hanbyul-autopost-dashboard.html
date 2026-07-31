@@ -140,9 +140,9 @@
     <h2>1. 소재 입력</h2>
 
     <label>미디어 (사진/영상)</label>
-    <div class="drop" id="drop">📷 클릭하거나 파일을 끌어다 놓으세요<br><span style="font-size:11px">jpg · png · mp4 등 (아이폰 사진은 JPG로 자동 변환)</span></div>
-    <!-- accept 에 heic 를 넣지 않아야 아이폰이 JPG 로 자동 변환해 올린다 (HEIC 원본은 웹에서 깨짐) -->
-    <input type="file" id="file" multiple accept="image/jpeg,image/png,image/gif,image/webp,video/*" style="display:none" />
+    <div class="drop" id="drop">📷 클릭하거나 파일을 끌어다 놓으세요<br><span style="font-size:11px">jpg · png · heic · mp4 등 (아이폰 HEIC 사진은 JPG로 자동 변환)</span></div>
+    <!-- HEIC 도 선택 가능 — 선택 즉시 브라우저에서 JPG 로 변환해 파이프라인에 태운다 (원본 HEIC 는 발행 채널에서 깨짐) -->
+    <input type="file" id="file" multiple accept="image/jpeg,image/png,image/gif,image/webp,image/heic,image/heif,.heic,.heif,video/*" style="display:none" />
     <div class="thumbs" id="thumbs"></div>
     <button class="mini" id="analyzeBtn" style="margin-top:8px;display:none">🔍 사진 분석 (글과 일치 검증)</button>
     <div id="imgDesc" style="display:none;font-size:12px;background:#0e1b14;border:1px solid #1d3a2a;
@@ -455,14 +455,63 @@ async function isHeicFile(f){
   return false;
 }
 
+// heic2any(libheif WASM) 지연 로딩 — HEIC 파일이 실제로 들어올 때만 lib/heic2any.min.js 를 불러온다
+let heicLibPromise=null;
+function loadHeicLib(){
+  if(window.heic2any) return Promise.resolve();
+  if(heicLibPromise) return heicLibPromise;
+  heicLibPromise=new Promise((res,rej)=>{
+    const s=document.createElement('script');
+    s.src='lib/heic2any.min.js';
+    s.onload=()=>res();
+    s.onerror=()=>{ heicLibPromise=null; rej(new Error('HEIC 변환 라이브러리 로드 실패')); };
+    document.head.appendChild(s);
+  });
+  return heicLibPromise;
+}
+
+// HEIC → JPEG 변환 (2단계)
+// 1차: createImageBitmap 네이티브 디코딩 — 아이폰 사파리는 HEIC 를 직접 디코딩하는 경우가 많음
+// 2차: heic2any(libheif WASM) 폴백 — 크롬/엣지 등 네이티브 미지원 브라우저용
+async function convertHeicToJpeg(file){
+  const base=((file.name||'photo').replace(/\.[^.]+$/,''))||'photo';
+  try{
+    const bmp=await createImageBitmap(file);
+    const cv=document.createElement('canvas');
+    cv.width=bmp.width; cv.height=bmp.height;
+    cv.getContext('2d').drawImage(bmp,0,0);
+    bmp.close&&bmp.close();
+    const blob=await new Promise((res,rej)=>cv.toBlob(b=>b?res(b):rej(new Error('toBlob 실패')),'image/jpeg',0.9));
+    return new File([blob], base+'.jpg', {type:'image/jpeg'});
+  }catch(e){ /* 네이티브 디코딩 불가 → WASM 폴백 */ }
+  await loadHeicLib();
+  let out=await heic2any({blob:file, toType:'image/jpeg', quality:0.9});
+  if(Array.isArray(out)) out=out[0];
+  return new File([out], base+'.jpg', {type:'image/jpeg'});
+}
+
 async function handleFiles(files){
-  const rejected=[];
-  for(const f of [...files]){
-    if(await isHeicFile(f)){ rejected.push(f.name); continue; }
-    addMediaFile(f);
+  const failed=[];
+  const arr=[...files];
+  const hasHeic=[];
+  for(const f of arr) hasHeic.push(await isHeicFile(f));
+  const dropEl=document.getElementById('drop');
+  const dropHtml=dropEl.innerHTML;
+  if(hasHeic.some(Boolean)) dropEl.innerHTML='⏳ 아이폰 HEIC 사진을 JPG로 변환 중…';
+  try{
+    for(let i=0;i<arr.length;i++){
+      let f=arr[i];
+      if(hasHeic[i]){
+        try{ f=await convertHeicToJpeg(f); }
+        catch(e){ console.warn('HEIC 변환 실패:', f.name, e); failed.push(f.name); continue; }
+      }
+      addMediaFile(f);
+    }
+  }finally{
+    dropEl.innerHTML=dropHtml;
   }
-  if(rejected.length){
-    alert("아이폰 HEIC 사진은 웹·발행 채널에서 표시되지 않아 사용할 수 없습니다:\n- "+rejected.join('\n- ')+
+  if(failed.length){
+    alert("다음 HEIC 사진은 JPG 변환에 실패해 제외되었습니다:\n- "+failed.join('\n- ')+
       "\n\n아이폰 설정 > 카메라 > 포맷을 '높은 호환성'으로 바꾸거나, 사진을 JPG로 변환 후 다시 선택해 주세요.");
   }
   // 이미지가 하나라도 있으면 '사진 분석' 버튼 노출
