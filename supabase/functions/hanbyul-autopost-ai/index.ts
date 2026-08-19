@@ -790,11 +790,28 @@ async function queueSave(p: {
 // Meta(Instagram·Facebook) & Threads 발행
 // 토큰/ID 는 Supabase Secret. 미디어는 공개 Storage URL 사용(Meta 요구).
 // ──────────────────────────────────────────────
-const META_PAGE_ID    = Deno.env.get("META_PAGE_ID") || "";
-const META_PAGE_TOKEN = Deno.env.get("META_PAGE_TOKEN") || "";
-const META_IG_USER_ID = Deno.env.get("META_IG_USER_ID") || "";
-const THREADS_USER_ID = Deno.env.get("THREADS_USER_ID") || "";
-const THREADS_TOKEN   = Deno.env.get("THREADS_TOKEN") || "";
+let META_PAGE_ID    = Deno.env.get("META_PAGE_ID") || "";
+let META_PAGE_TOKEN = Deno.env.get("META_PAGE_TOKEN") || "";
+let META_IG_USER_ID = Deno.env.get("META_IG_USER_ID") || "";
+let THREADS_USER_ID = Deno.env.get("THREADS_USER_ID") || "";
+let THREADS_TOKEN   = Deno.env.get("THREADS_TOKEN") || "";
+// Edge Function Secrets 를 못 쓰는 환경 대비: autopost_config 테이블(service_role 전용)에서 보충 로드.
+// env 값이 있으면 env 우선. 실패해도 기존 동작 유지.
+let metaCfgLoaded = false;
+async function loadMetaConfig() {
+  if (metaCfgLoaded) return;
+  try {
+    const rows = (await sbRest("GET", "autopost_config?select=key,value")) || [];
+    const m: Record<string, string> = {};
+    for (const r of rows as Array<{ key: string; value: string }>) m[r.key] = r.value;
+    META_PAGE_ID    = META_PAGE_ID    || m.META_PAGE_ID    || "";
+    META_PAGE_TOKEN = META_PAGE_TOKEN || m.META_PAGE_TOKEN || "";
+    META_IG_USER_ID = META_IG_USER_ID || m.META_IG_USER_ID || "";
+    THREADS_USER_ID = THREADS_USER_ID || m.THREADS_USER_ID || "";
+    THREADS_TOKEN   = THREADS_TOKEN   || m.THREADS_TOKEN   || "";
+    metaCfgLoaded = true;
+  } catch (_e) { /* 다음 요청에서 재시도 */ }
+}
 // Meta 개발자앱 없이 인스타 발행하는 우회로(Make 웹훅). 직접 토큰이 있으면 그쪽이 우선.
 const MAKE_IG_WEBHOOK = Deno.env.get("MAKE_IG_WEBHOOK") || "";
 const GRAPH = "https://graph.facebook.com/v21.0";
@@ -948,6 +965,7 @@ Deno.serve(async (req: Request) => {
 
   try {
     if (req.method === "GET" && (sub === "/health" || sub === "/")) {
+      await loadMetaConfig();
       return jsonResponse(200, {
         ok: true,
         ai: ANTHROPIC_KEY ? "anthropic" : "none",
@@ -1053,17 +1071,20 @@ Deno.serve(async (req: Request) => {
     }
 
     if (req.method === "POST" && sub === "/publish/facebook") {
+      await loadMetaConfig();
       const p = await req.json() as { message?: string; imageUrls?: string[]; videoUrls?: string[] };
       if (!p.message && !(p.imageUrls?.length) && !(p.videoUrls?.length)) return jsonResponse(400, { ok: false, error: "내용이 비었습니다." });
       return jsonResponse(200, { ok: true, ...(await publishFacebook({ message: p.message || "", imageUrls: p.imageUrls, videoUrls: p.videoUrls })) });
     }
 
     if (req.method === "POST" && sub === "/publish/instagram") {
+      await loadMetaConfig();
       const p = await req.json() as { caption?: string; imageUrls?: string[]; videoUrls?: string[] };
       return jsonResponse(200, { ok: true, ...(await publishInstagram({ caption: p.caption || "", imageUrls: p.imageUrls, videoUrls: p.videoUrls })) });
     }
 
     if (req.method === "POST" && sub === "/publish/threads") {
+      await loadMetaConfig();
       const p = await req.json() as { text?: string; imageUrls?: string[]; videoUrls?: string[] };
       return jsonResponse(200, { ok: true, ...(await publishThreads({ text: p.text || "", imageUrls: p.imageUrls, videoUrls: p.videoUrls })) });
     }
