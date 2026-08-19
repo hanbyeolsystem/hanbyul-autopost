@@ -795,6 +795,8 @@ const META_PAGE_TOKEN = Deno.env.get("META_PAGE_TOKEN") || "";
 const META_IG_USER_ID = Deno.env.get("META_IG_USER_ID") || "";
 const THREADS_USER_ID = Deno.env.get("THREADS_USER_ID") || "";
 const THREADS_TOKEN   = Deno.env.get("THREADS_TOKEN") || "";
+// Meta 개발자앱 없이 인스타 발행하는 우회로(Make 웹훅). 직접 토큰이 있으면 그쪽이 우선.
+const MAKE_IG_WEBHOOK = Deno.env.get("MAKE_IG_WEBHOOK") || "";
 const GRAPH = "https://graph.facebook.com/v21.0";
 const THREADS_API = "https://graph.threads.net/v1.0";
 
@@ -848,7 +850,24 @@ async function publishFacebook(p: { message: string; imageUrls?: string[]; video
   return { id: postId, url: `https://www.facebook.com/${postId || META_PAGE_ID}` };
 }
 
+async function publishInstagramViaMake(p: { caption: string; imageUrls?: string[] }) {
+  const img = (p.imageUrls || [])[0];
+  if (!img) throw new Error("Make 경유 인스타 발행은 사진 1장 이상이 필요합니다(영상은 직접연동 필요).");
+  const r = await fetch(MAKE_IG_WEBHOOK, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ image_url: img, caption: p.caption || "" }),
+  });
+  const txt = await r.text();
+  if (!r.ok) throw new Error(`Make 인스타 발행 실패 ${r.status}: ${txt.slice(0, 300)}`);
+  let id = "";
+  try { id = (JSON.parse(txt).post_id) || ""; } catch { /* Accepted 등 텍스트 응답 */ }
+  return { id, url: "https://www.instagram.com/", via: "make" };
+}
+
 async function publishInstagram(p: { caption: string; imageUrls?: string[]; videoUrls?: string[] }) {
+  // 직접 연동(토큰) 없으면 Make 웹훅 우회로 사용
+  if ((!META_IG_USER_ID || !META_PAGE_TOKEN) && MAKE_IG_WEBHOOK) return await publishInstagramViaMake(p);
   if (!META_IG_USER_ID || !META_PAGE_TOKEN) throw new Error("META_IG_USER_ID / META_PAGE_TOKEN 시크릿이 필요합니다.");
   const tok = META_PAGE_TOKEN, IG = META_IG_USER_ID;
   const imgs = p.imageUrls || [], vids = p.videoUrls || [];
@@ -950,7 +969,7 @@ Deno.serve(async (req: Request) => {
             configured: !!(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET && GOOGLE_REFRESH_TOKEN),
           },
           facebook: { configured: !!(META_PAGE_ID && META_PAGE_TOKEN) },
-          instagram: { configured: !!(META_IG_USER_ID && META_PAGE_TOKEN) },
+          instagram: { configured: !!((META_IG_USER_ID && META_PAGE_TOKEN) || MAKE_IG_WEBHOOK), via: (META_IG_USER_ID && META_PAGE_TOKEN) ? "direct" : (MAKE_IG_WEBHOOK ? "make" : null) },
           threads: { configured: !!(THREADS_USER_ID && THREADS_TOKEN) },
         },
       });

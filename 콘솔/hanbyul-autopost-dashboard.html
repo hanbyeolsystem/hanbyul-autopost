@@ -1509,6 +1509,21 @@ function splitTitleAndBody(text){
 }
 
 // 바로발행 — 채널별 분기. 구글 블로그는 실제 API, 유튜브는 복사+업로드창 열기, 나머지는 게시판 기록
+// 인스타 Make 경유 브릿지 — Meta 개발자앱/직접토큰이 없을 때 사용.
+// 같은 Supabase 프로젝트의 hanbyul-ig-make 함수를 호출한다(웹훅 URL 은 서버에만 있음).
+async function tryInstagramViaBridge(apiBase, caption, imgs){
+  try {
+    const base = String(apiBase).replace(/\/functions\/v1\/.*$/, '/functions/v1/hanbyul-ig-make');
+    if (!/hanbyul-ig-make$/.test(base)) return null;      // 로컬/NAS 백엔드면 건너뜀
+    const r = await aiFetch(base, '', { method:'POST', body: JSON.stringify({ caption, imageUrls: imgs }) });
+    const d = await r.json().catch(()=>null);
+    if (r.ok && d && d.ok) return { ok:true, url: d.url };
+    const msg = (d && d.error) || ('HTTP '+r.status);
+    if (/설정되지 않았습니다/.test(msg)) return null;      // 브릿지 미구성 → 직접연동 시도
+    return { ok:false, hardError: '인스타 발행 실패(Make 경유): ' + msg };
+  } catch (e) { return null; }
+}
+
 async function publishNow(ch, text){
   if (ch.id === 'youtube') {
     const videoFile = ytVideoFiles[ch.id];
@@ -1580,6 +1595,19 @@ async function publishNow(ch, text){
       const body = ch.id==='facebook' ? { message:caption, imageUrls:imgs, videoUrls:vids }
                  : ch.id==='instagram' ? { caption, imageUrls:imgs, videoUrls:vids }
                  : { text:caption, imageUrls:imgs, videoUrls:vids };
+      // 인스타는 Meta 직접토큰이 아직 없어 Make 경유 브릿지 함수를 먼저 시도한다.
+      // (사진 1장 필요. 성공하면 그대로 종료, 실패하면 아래 직접연동 경로로 계속)
+      if (ch.id === 'instagram' && imgs.length) {
+        const bridged = await tryInstagramViaBridge(apiBase, caption, imgs);
+        if (bridged && bridged.ok) {
+          addToBoard(ch.id, makePost(ch, text, '발행', { url: bridged.url }));
+          saveHistory(ch.id, text);
+          alert('✅ 인스타그램 발행 완료 (Make 경유)'+(bridged.url ? String.fromCharCode(10)+bridged.url : ''));
+          if (bridged.url) window.open(bridged.url, '_blank');
+          return;
+        }
+        if (bridged && bridged.hardError) throw new Error(bridged.hardError);
+      }
       const r = await aiFetch(apiBase, path, { method:'POST', body: JSON.stringify(body) });
       const d = await r.json().catch(()=>({ok:false,error:'응답 파싱 실패'}));
       if (!r.ok || !d.ok) {
