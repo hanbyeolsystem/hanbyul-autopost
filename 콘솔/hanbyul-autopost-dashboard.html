@@ -1595,21 +1595,20 @@ async function publishNow(ch, text){
       const body = ch.id==='facebook' ? { message:caption, imageUrls:imgs, videoUrls:vids }
                  : ch.id==='instagram' ? { caption, imageUrls:imgs, videoUrls:vids }
                  : { text:caption, imageUrls:imgs, videoUrls:vids };
-      // 인스타는 Meta 직접토큰이 아직 없어 Make 경유 브릿지 함수를 먼저 시도한다.
-      // (사진 1장 필요. 성공하면 그대로 종료, 실패하면 아래 직접연동 경로로 계속)
-      if (ch.id === 'instagram' && imgs.length) {
+      // 2026-08-19: Meta 직접연동(개발자앱 한별광고) 라이브 → 직접 발행이 1순위.
+      // 직접 발행이 실패하면 Make 브릿지(hanbyul-ig-make)를 폴백으로 시도한다.
+      const r = await aiFetch(apiBase, path, { method:'POST', body: JSON.stringify(body) });
+      const d = await r.json().catch(()=>({ok:false,error:'응답 파싱 실패'}));
+      if ((!r.ok || !d.ok) && ch.id === 'instagram' && imgs.length) {
         const bridged = await tryInstagramViaBridge(apiBase, caption, imgs);
         if (bridged && bridged.ok) {
           addToBoard(ch.id, makePost(ch, text, '발행', { url: bridged.url }));
           saveHistory(ch.id, text);
-          alert('✅ 인스타그램 발행 완료 (Make 경유)'+(bridged.url ? String.fromCharCode(10)+bridged.url : ''));
+          alert('✅ 인스타그램 발행 완료 (Make 경유 폴백)'+(bridged.url ? String.fromCharCode(10)+bridged.url : ''));
           if (bridged.url) window.open(bridged.url, '_blank');
           return;
         }
-        if (bridged && bridged.hardError) throw new Error(bridged.hardError);
       }
-      const r = await aiFetch(apiBase, path, { method:'POST', body: JSON.stringify(body) });
-      const d = await r.json().catch(()=>({ok:false,error:'응답 파싱 실패'}));
       if (!r.ok || !d.ok) {
         if ((d.error||'').includes('시크릿')) {   // 토큰 미설정 → 반자동 폴백
           try { await navigator.clipboard.writeText(text); } catch(e){}
