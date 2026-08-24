@@ -833,12 +833,18 @@ async function gget(url: string) {
   if (!r.ok || d.error) throw new Error("Graph " + r.status + ": " + JSON.stringify(d.error || d).slice(0, 300));
   return d;
 }
-// 영상/릴스 컨테이너 처리 완료 대기
+// 영상/릴스/캐러셀 컨테이너 처리 완료 대기.
+// ⚠ Instagram(Graph API)은 status_code 필드(FINISHED/IN_PROGRESS/ERROR/EXPIRED)를 쓰지만,
+//   Threads(graph.threads.net)는 status_code 필드 자체가 없고 status 필드에 같은 값이 직접 들어온다.
+//   같은 fields= 요청을 양쪽에 쓰면 Threads 쪽에서 "Tried accessing nonexisting field (status_code)" 400 이 난다.
 async function waitContainer(api: string, id: string, token: string) {
+  const isThreads = api === THREADS_API;
+  const statusField = isThreads ? "status" : "status_code";
   for (let i = 0; i < 40; i++) {
-    const d = await gget(`${api}/${id}?fields=status_code,status&access_token=${encodeURIComponent(token)}`);
-    if (d.status_code === "FINISHED") return;
-    if (d.status_code === "ERROR" || d.status_code === "EXPIRED") throw new Error("미디어 처리 실패: " + (d.status || d.status_code));
+    const d = await gget(`${api}/${id}?fields=${statusField}&access_token=${encodeURIComponent(token)}`);
+    const code = d[statusField];
+    if (code === "FINISHED") return;
+    if (code === "ERROR" || code === "EXPIRED") throw new Error("미디어 처리 실패: " + code);
     await new Promise((res) => setTimeout(res, 3000));
   }
   throw new Error("미디어 처리 시간 초과(영상이 너무 길거나 큼)");
@@ -900,7 +906,9 @@ async function publishInstagram(p: { caption: string; imageUrls?: string[]; vide
   } else {
     const children: string[] = [];
     for (const image_url of imgs.slice(0, 10)) {
-      children.push((await gpost(`${GRAPH}/${IG}/media`, { image_url, is_carousel_item: "true", access_token: tok })).id);
+      const cid = (await gpost(`${GRAPH}/${IG}/media`, { image_url, is_carousel_item: "true", access_token: tok })).id;
+      await waitContainer(GRAPH, cid, tok);   // 이미지도 비동기 처리 — FINISHED 될 때까지 대기해야 부모 캐러셀이 참조 가능
+      children.push(cid);
     }
     for (const video_url of vids.slice(0, Math.max(0, 10 - children.length))) {
       const cid = (await gpost(`${GRAPH}/${IG}/media`, { media_type: "VIDEO", video_url, is_carousel_item: "true", access_token: tok })).id;
@@ -908,6 +916,7 @@ async function publishInstagram(p: { caption: string; imageUrls?: string[]; vide
       children.push(cid);
     }
     creationId = (await gpost(`${GRAPH}/${IG}/media`, { media_type: "CAROUSEL", children: children.join(","), caption: p.caption, access_token: tok })).id;
+    await waitContainer(GRAPH, creationId, tok);   // 부모 캐러셀 컨테이너도 비동기 처리 — 생성 직후 바로 publish 하면 "미디어를 찾을 수 없음" 남
   }
   const pub = await gpost(`${GRAPH}/${IG}/media_publish`, { creation_id: creationId, access_token: tok });
   return { id: pub.id, url: "https://www.instagram.com/" };
@@ -928,7 +937,9 @@ async function publishThreads(p: { text: string; imageUrls?: string[]; videoUrls
   } else {
     const children: string[] = [];
     for (const image_url of imgs) {
-      children.push((await gpost(`${THREADS_API}/${TID}/threads`, { media_type: "IMAGE", image_url, is_carousel_item: "true", access_token: tok })).id);
+      const cid = (await gpost(`${THREADS_API}/${TID}/threads`, { media_type: "IMAGE", image_url, is_carousel_item: "true", access_token: tok })).id;
+      await waitContainer(THREADS_API, cid, tok);   // 이미지도 비동기 처리 — FINISHED 될 때까지 대기해야 부모 캐러셀이 참조 가능
+      children.push(cid);
     }
     for (const video_url of vids) {
       const cid = (await gpost(`${THREADS_API}/${TID}/threads`, { media_type: "VIDEO", video_url, is_carousel_item: "true", access_token: tok })).id;
@@ -936,9 +947,169 @@ async function publishThreads(p: { text: string; imageUrls?: string[]; videoUrls
       children.push(cid);
     }
     creationId = (await gpost(`${THREADS_API}/${TID}/threads`, { media_type: "CAROUSEL", children: children.join(","), text: p.text, access_token: tok })).id;
+    await waitContainer(THREADS_API, creationId, tok);   // 부모 캐러셀 컨테이너도 비동기 처리 — 생성 직후 바로 publish 하면 "미디어를 찾을 수 없음" 남
   }
   const pub = await gpost(`${THREADS_API}/${TID}/threads_publish`, { creation_id: creationId, access_token: tok });
   return { id: pub.id, url: "https://www.threads.net/" };
+}
+
+// ──────────────────────────────────────────────
+// 댓글 자동응답 (인스타·페이스북·쓰레드)
+//   최근 게시물 훑어 새 댓글 감지 → AI 분류(감사/문의/일반/불만/스팸) → 감사·문의엔 자동 답글,
+//   불만·스팸은 답글을 달지 않고 사람이 보도록 skipped_reason 만 기록.
+//   중복 방지는 autopost_comments.comment_id UNIQUE 로 처리.
+// ──────────────────────────────────────────────
+const SELF_USERNAME = "sanghwan_hanbyeol"; // 인스타·쓰레드 공용 계정명 — 우리 자신이 단 답글은 스캔에서 제외
+
+interface RawComment {
+  platform: string;
+  comment_id: string;
+  post_id: string;
+  author: string;
+  text: string;
+}
+
+async function fetchInstagramComments(): Promise<RawComment[]> {
+  const tok = META_PAGE_TOKEN;
+  const media = await gget(`${GRAPH}/${META_IG_USER_ID}/media?fields=id&limit=15&access_token=${encodeURIComponent(tok)}`);
+  const out: RawComment[] = [];
+  for (const m of (media.data || [])) {
+    try {
+      const c = await gget(`${GRAPH}/${m.id}/comments?fields=id,text,username&limit=50&access_token=${encodeURIComponent(tok)}`);
+      for (const cm of (c.data || [])) {
+        if (!cm.text || cm.username === SELF_USERNAME) continue;
+        out.push({ platform: "instagram", comment_id: cm.id, post_id: m.id, author: cm.username || "", text: cm.text });
+      }
+    } catch (_e) { /* 개별 게시물 댓글 조회 실패는 건너뜀 */ }
+  }
+  return out;
+}
+
+async function fetchFacebookComments(): Promise<RawComment[]> {
+  const tok = META_PAGE_TOKEN;
+  const posts = await gget(`${GRAPH}/${META_PAGE_ID}/posts?fields=id&limit=15&access_token=${encodeURIComponent(tok)}`);
+  const out: RawComment[] = [];
+  for (const p of (posts.data || [])) {
+    try {
+      const c = await gget(`${GRAPH}/${p.id}/comments?fields=id,message,from&limit=50&access_token=${encodeURIComponent(tok)}`);
+      for (const cm of (c.data || [])) {
+        if (!cm.message || (cm.from && cm.from.id === META_PAGE_ID)) continue;
+        out.push({ platform: "facebook", comment_id: cm.id, post_id: p.id, author: (cm.from && cm.from.name) || "", text: cm.message });
+      }
+    } catch (_e) { /* 건너뜀 */ }
+  }
+  return out;
+}
+
+async function fetchThreadsComments(): Promise<RawComment[]> {
+  const tok = THREADS_TOKEN;
+  const posts = await gget(`${THREADS_API}/${THREADS_USER_ID}/threads?fields=id&limit=15&access_token=${encodeURIComponent(tok)}`);
+  const out: RawComment[] = [];
+  for (const p of (posts.data || [])) {
+    try {
+      const c = await gget(`${THREADS_API}/${p.id}/replies?fields=id,text,username&access_token=${encodeURIComponent(tok)}`);
+      for (const cm of (c.data || [])) {
+        if (!cm.text || cm.username === SELF_USERNAME) continue;
+        out.push({ platform: "threads", comment_id: cm.id, post_id: p.id, author: cm.username || "", text: cm.text });
+      }
+    } catch (_e) { /* 건너뜀 */ }
+  }
+  return out;
+}
+
+// 댓글 성격 분류 + 답글 초안 생성 (Claude, 저가 모델)
+async function classifyComment(text: string): Promise<{ sentiment: string; reply: string }> {
+  if (!ANTHROPIC_KEY) throw new Error("ANTHROPIC_API_KEY 시크릿이 필요합니다.");
+  const prompt = `당신은 ${COMPANY.name} SNS 댓글 담당자입니다. 아래 댓글에 대한 답글을 작성합니다.
+[톤] 파는 곳이 아니라 돕는 곳. 과장 없이 따뜻하고 담백하게. 이모지는 0~1개만.
+[분류]
+- thanks: 감사·칭찬·응원 댓글 → 짧고 진심 어린 감사 인사(1~2문장)
+- question: 가격·설치·방문 등 문의성 댓글 → 감사 인사 + 간단 답변 + "편하게 전화(${COMPANY.tel}) 주세요" 유도(2~3문장)
+- neutral: 그 외 일반 댓글(공감·한마디) → 짧은 감사·공감 답글(1문장)
+- complaint: 불만·항의·클레임 → reply 는 빈 문자열로(사람이 직접 대응해야 함)
+- spam: 광고·도배·욕설 등 스팸성 → reply 는 빈 문자열로
+
+댓글: "${text.replace(/"/g, "'").slice(0, 500)}"
+
+다른 설명 없이 JSON 한 줄로만 응답하세요: {"sentiment":"thanks|question|neutral|complaint|spam","reply":"..."}`;
+  const r = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01" },
+    body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 400, thinking: { type: "disabled" }, messages: [{ role: "user", content: prompt }] }),
+  });
+  if (!r.ok) throw new Error("Comment classify " + r.status + ": " + (await r.text()).slice(0, 200));
+  const d = await r.json();
+  const raw = (d.content || []).map((c: { text: string }) => c.text).join("").trim();
+  const jsonStr = raw.replace(/^```json\s*/i, "").replace(/```\s*$/, "").trim();
+  try {
+    const parsed = JSON.parse(jsonStr);
+    return { sentiment: String(parsed.sentiment || "neutral"), reply: String(parsed.reply || "") };
+  } catch {
+    return { sentiment: "neutral", reply: "" };
+  }
+}
+
+async function postCommentReply(platform: string, commentId: string, text: string) {
+  if (platform === "instagram") {
+    await gpost(`${GRAPH}/${commentId}/replies`, { message: text, access_token: META_PAGE_TOKEN });
+  } else if (platform === "facebook") {
+    await gpost(`${GRAPH}/${commentId}/comments`, { message: text, access_token: META_PAGE_TOKEN });
+  } else if (platform === "threads") {
+    const cid = (await gpost(`${THREADS_API}/${THREADS_USER_ID}/threads`, { media_type: "TEXT", text, reply_to_id: commentId, access_token: THREADS_TOKEN })).id;
+    await waitContainer(THREADS_API, cid, THREADS_TOKEN);
+    await gpost(`${THREADS_API}/${THREADS_USER_ID}/threads_publish`, { creation_id: cid, access_token: THREADS_TOKEN });
+  } else {
+    throw new Error("알 수 없는 플랫폼: " + platform);
+  }
+}
+
+async function pollComments() {
+  await loadMetaConfig();
+  const raw: RawComment[] = [];
+  if (META_PAGE_TOKEN && META_IG_USER_ID) raw.push(...(await fetchInstagramComments().catch(() => [])));
+  if (META_PAGE_TOKEN && META_PAGE_ID) raw.push(...(await fetchFacebookComments().catch(() => [])));
+  if (THREADS_TOKEN && THREADS_USER_ID) raw.push(...(await fetchThreadsComments().catch(() => [])));
+  if (!raw.length) return { processed: [] };
+
+  // 이미 처리한 댓글 제외 (comment_id UNIQUE 기준)
+  const idList = raw.map((r) => r.comment_id).join(",");
+  const existing = idList ? await sbRest("GET", `autopost_comments?select=comment_id&comment_id=in.(${idList})`) : [];
+  const seen = new Set((existing || []).map((r: { comment_id: string }) => r.comment_id));
+  const fresh = raw.filter((r) => !seen.has(r.comment_id));
+
+  const processed: Record<string, unknown>[] = [];
+  for (const c of fresh) {
+    let sentiment = "neutral", replyText = "", replied = false, skippedReason = "";
+    try {
+      const cls = await classifyComment(c.text);
+      sentiment = cls.sentiment;
+      replyText = cls.reply;
+    } catch (e) {
+      skippedReason = "분류 실패: " + ((e as Error).message || String(e));
+    }
+    if (!skippedReason && (sentiment === "complaint" || sentiment === "spam" || !replyText)) {
+      skippedReason = sentiment === "complaint" ? "불만성 댓글 — 직접 대응 필요"
+        : sentiment === "spam" ? "스팸 의심 — 자동응답 안 함"
+        : "답글 생성 실패";
+    } else if (!skippedReason) {
+      try {
+        await postCommentReply(c.platform, c.comment_id, replyText);
+        replied = true;
+      } catch (e) {
+        skippedReason = "답글 등록 실패: " + ((e as Error).message || String(e));
+      }
+    }
+    const row = {
+      platform: c.platform, comment_id: c.comment_id, post_id: c.post_id,
+      author: c.author, comment_text: c.text, sentiment, reply_text: replyText,
+      replied, skipped_reason: skippedReason || null,
+    };
+    try {
+      await sbRest("POST", "autopost_comments", row, { Prefer: "return=representation" });
+    } catch (_e) { /* insert 실패 시 다음 폴링에서도 다시 신규로 잡혀 재시도됨 */ }
+    processed.push(row);
+  }
+  return { processed };
 }
 
 function corsHeaders() {
@@ -1087,6 +1258,10 @@ Deno.serve(async (req: Request) => {
       await loadMetaConfig();
       const p = await req.json() as { text?: string; imageUrls?: string[]; videoUrls?: string[] };
       return jsonResponse(200, { ok: true, ...(await publishThreads({ text: p.text || "", imageUrls: p.imageUrls, videoUrls: p.videoUrls })) });
+    }
+
+    if (req.method === "POST" && sub === "/comments/poll") {
+      return jsonResponse(200, { ok: true, ...(await pollComments()) });
     }
 
     // ── 대기열 파이프라인 ──
