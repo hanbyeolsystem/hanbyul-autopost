@@ -195,7 +195,35 @@
           <option value="review">후기형</option>
           <option value="guide">가이드형</option>
           <option value="case">사례형</option>
+          <option value="ad">📣 광고형 (SNS광고)</option>
         </select>
+      </div>
+    </div>
+
+    <!-- 광고형을 골랐을 때만 열린다. 광고는 '무엇을·누구에게·왜 지금'이 없으면 혼잣말이 된다. -->
+    <div id="adBox" style="display:none;border:1px solid var(--line,#d7dfea);border-left:3px solid #c2410c;
+         border-radius:8px;padding:12px 14px;margin-top:10px;background:rgba(194,65,12,.04)">
+      <div style="font-weight:700;font-size:13.5px;margin-bottom:8px">📣 광고 내용</div>
+      <div class="row">
+        <div>
+          <label>무엇을 알리나 <span style="font-size:11px;color:var(--sub)">(신모델·행사·서비스)</span></label>
+          <input id="adOffer" placeholder="예) 시놀로지 DS925+ 신모델 입고" />
+        </div>
+        <div>
+          <label>누구에게</label>
+          <input id="adTarget" placeholder="예) 자료 백업이 걱정인 대구 사무실" />
+        </div>
+      </div>
+      <label style="margin-top:8px">고객이 얻는 것</label>
+      <input id="adBenefit" placeholder="예) 설치·초기설정까지 해드리고, 기존 자료 이전도 같이" />
+      <label style="margin-top:8px">조건 <span style="font-size:11px;color:var(--sub)">(기간·대상·수량·부가세 — 있으면 반드시)</span></label>
+      <input id="adCondition" placeholder="예) 9월까지 · 선착순 5대 · 표시가격 부가세 별도" />
+      <label style="margin-top:8px">원하는 행동 <span style="font-size:11px;color:var(--sub)">(하나만)</span></label>
+      <input id="adCta" placeholder="예) 전화로 우리 사무실에 맞는지 물어보기" />
+      <div class="note" style="margin-top:8px">
+        <b>표시광고법</b> — 근거 없는 <b>최고·1등·무조건</b> 은 쓰지 않습니다. 조건이 있으면 본문에 같이 적습니다.
+        할인 표시는 비교 대상 가격이 실제로 있을 때만 씁니다. 어기면 과태료 대상입니다.<br>
+        짧은 채널(인스타·쓰레드·페이스북)에는 <b>첫 줄 대안 2개</b>가 같이 나옵니다. 바꿔 가며 반응을 보세요.
       </div>
     </div>
 
@@ -796,6 +824,11 @@ function readGenInputs(){
     pain: document.getElementById('pain').value,
     solution: document.getElementById('solution').value,
     postType: document.getElementById('posttype').value,
+    adOffer:     (document.getElementById('adOffer')||{}).value || '',
+    adBenefit:   (document.getElementById('adBenefit')||{}).value || '',
+    adCondition: (document.getElementById('adCondition')||{}).value || '',
+    adTarget:    (document.getElementById('adTarget')||{}).value || '',
+    adCta:       (document.getElementById('adCta')||{}).value || '',
     apiBase: document.getElementById('apiBase').value.trim(),
     imageDesc: imageDescText,
     imageCount: media.filter(f=>f.type.startsWith('image/')).length,
@@ -1236,7 +1269,21 @@ try{ totalCost = parseFloat(localStorage.getItem('hanbyul_totalCost')||'0')||0; 
 function saveTotalCost(){ try{ localStorage.setItem('hanbyul_totalCost', String(totalCost)); }catch(e){} }
 document.addEventListener('DOMContentLoaded', ()=>{
   document.getElementById('costTotal').textContent = '$'+totalCost.toFixed(4);
+  syncAdBox();
 });
+
+/* 광고형을 골랐을 때만 광고 입력칸을 연다.
+   평소 글에는 필요 없는 칸이라 늘 띄워 두면 화면만 복잡해진다. */
+function syncAdBox(){
+  var sel = document.getElementById('posttype');
+  var box = document.getElementById('adBox');
+  if(!sel || !box) return;
+  box.style.display = (sel.value === 'ad') ? '' : 'none';
+}
+(function(){
+  var sel = document.getElementById('posttype');
+  if(sel) sel.addEventListener('change', syncAdBox);
+})();
 document.getElementById('costTotal').textContent = '$'+totalCost.toFixed(4);
 document.getElementById('costReset').onclick=()=>{
   if(confirm('누적 사용 비용을 0으로 초기화할까요?')){ totalCost=0; saveTotalCost();
