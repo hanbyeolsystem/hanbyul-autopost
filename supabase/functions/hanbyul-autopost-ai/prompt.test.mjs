@@ -88,4 +88,32 @@ for (const t of ["review", "guide", "case"]) {
   assert.ok(!out.includes("[광고형"), "폴백인데 광고가 붙었다");
 }
 
-console.log("광고형 프롬프트 검증 통과 — 평소글 비오염 · 표시광고법 가드 · 입력 전달 · 폴백 유지");
+// ── 7) 사람 문체 규칙은 모든 유형에 실린다 ──
+for (const t of ["review", "guide", "case", "ad"]) {
+  const out = buildPrompt({ ...base, postType: t });
+  assert.ok(out.includes("[사람이 쓴 글처럼"), `${t}: 사람 문체 규칙 없음`);
+  for (const must of ["쉼표를 아껴라", "결론적으로", "가지고 있다", "번역투"]) {
+    assert.ok(out.includes(must), `${t}: 문체 규칙에 "${must}" 없음`);
+  }
+}
+
+// ── 8) 노출 규칙(SEO·AEO·GEO)도 모든 유형에 실린다 ──
+{
+  const out = buildPrompt({ ...base, postType: "review" });
+  assert.ok(out.includes("[검색·AI 노출"), "노출 규칙 없음");
+  // AEO/GEO 의 핵심: 질문 아래 답부터, 40~60자
+  assert.ok(out.includes("40~60자"), "직답 문단 규칙이 없다 (AI 인용의 핵심)");
+  assert.ok(out.includes("질문을 소제목으로"), "질문형 소제목 규칙 없음");
+  assert.ok(out.includes("숫자를 넣어라"), "구체 수치 규칙 없음");
+}
+
+// ── 9) 짧은 채널은 채널별 노출 규칙이 따로 붙는다 ──
+{
+  const ig = buildPrompt({ ...base, channel: "instagram", postType: "review" });
+  assert.ok(ig.includes("저장·공유가 노출을 키운다"), "인스타 저장 유도 규칙 없음");
+  const th = buildPrompt({ ...base, channel: "threads", postType: "review" });
+  assert.ok(th.includes("댓글이 붙어야 퍼진다"), "쓰레드 댓글 유도 규칙 없음");
+  assert.ok(!th.includes("저장·공유가 노출을 키운다"), "채널 규칙이 섞였다");
+}
+
+console.log("광고형 프롬프트 검증 통과 — 평소글 비오염 · 광고법 가드 · 입력 전달 · 폴백 · 사람문체 · 노출규칙");
