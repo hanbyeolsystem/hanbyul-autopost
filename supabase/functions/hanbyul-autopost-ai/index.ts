@@ -45,74 +45,174 @@ const PHILOSOPHY = `
 - 과장(최고/1등)·경쟁사 비방 금지. 솔직하고 따뜻하게.
 - 시놀로지 공식 대리점 + AI 자동화 결합이라는 강점을 자연스럽게 녹인다(자랑이 아니라 도움의 근거로).
 - 글과 사진은 반드시 일치해야 한다. 사진에 없는 것을 글에서 단정하지 않는다(신뢰의 핵심).
+- 입력값에 없는 업종·장소·수치·고객 반응을 지어내지 않는다. "달서구 사무실" 이라고 줬으면 병원·학원으로 바꾸지 마라. 미지정이면 두루뭉술하게 쓰거나 비운다.
 `;
 
 /* ══════════════ 사람이 쓴 글처럼 ══════════════
    AI 글은 한국어에서 측정 가능한 흔적을 남긴다(KatFishNet, ArXiv 2503.00032).
-   쉼표 비율 61% vs 사람 26%, 품사 다양성 저하, 의존명사 띄어쓰기가 기계처럼 일정함.
-   아래는 그 흔적을 지우기 위한 규칙이다. 문체만 바꾸는 것이지 사실을 바꾸지 않는다. */
+   아래 규칙은 im-not-ai(humanize-korean v2.3) 룰북의 S1·S2 핵심 패턴을 생성 단계에 옮긴 것이다.
+   문체만 바꾸는 것이지 사실을 바꾸지 않는다. 생성 뒤 humanizePass() 가 같은 룰북으로 한 번 더 다듬는다. */
 const HUMAN_VOICE = `
 [사람이 쓴 글처럼 — 반드시 지킬 것]
 AI가 쓴 티가 나면 독자도 검색엔진도 신뢰하지 않는다. 아래를 지켜라.
 
 1) 쉼표를 아껴라. AI 글의 최대 흔적이다.
    - 한 문장에 쉼표는 최대 1개. 대부분은 0개가 자연스럽다.
-   - "그래서, 결국," 처럼 접속부사 뒤에 쉼표를 찍지 마라.
-2) 문장 길이를 들쭉날쭉하게.
-   - 짧은 문장(10자 안팎)과 긴 문장(40자 이상)을 섞어라.
-   - 비슷한 길이가 세 문장 이어지면 하나를 잘라라.
-3) 아래 단어는 쓰지 마라. AI 글에서 과하게 나오는 말이다.
-   중요하다 · 핵심적 · 효과적 · 지속가능한 · 혁신적 · 다양한 · 필수적 · 주목할 만한
-   → 대신 구체적으로 써라. "효과적입니다" 가 아니라 "출력 대기 시간이 절반으로 줄었습니다".
+   - 연결어미(-고/-며/-지만/-면서/-아서/-어서) 바로 뒤에 쉼표를 찍지 마라. "그래서, 결국," 도 금지.
+2) 문장 길이를 들쭉날쭉하게. 짧은 문장(10자 안팎)과 긴 문장(40자 이상)을 섞어라.
+   비슷한 길이가 세 문장 이어지면 하나를 잘라라. 같은 종결어미가 네 문장 연속이면 바꿔라.
+3) 아래 단어·표현은 쓰지 마라. AI 글에서 과하게 나온다.
+   중요하다 · 핵심적 · 효과적 · 지속가능한 · 혁신적 · 획기적 · 압도적 · 다양한 · 필수적 · 주목할 만한 · 시사하는 바
+   → 대신 구체적으로. "효과적입니다" 가 아니라 "출력 대기 시간이 절반으로 줄었습니다".
 4) 번역투를 버려라.
-   - "~에 대해" → "~을/를",  "~를 통해" → "~로/~으로",  "~에 있어서" → "~에서/~은"
-   - "가지고 있다" → "있다",  "되어진다" → "된다",  "~에 의해" → "~이/가"
+   - "~에 대해" → "~을/를",  "~를 통해" → "~로",  "~에 있어서" → "~에서"
+   - "가지고 있다" → "있다",  "되어진다" → "된다",  "~에 의해" → 행위자를 주어로
    - "할 수 있습니다" 를 연달아 쓰지 마라. 한 문단에 한 번이면 충분하다.
-   - "~것입니다" 로 문장을 자꾸 끝내지 마라.
-5) 이런 마무리는 금지다. AI 글의 전형이다.
-   "결론적으로" · "정리하면" · "시사하는 바가 큽니다" · "~하시길 바랍니다"
+   - "~것입니다" · "~일 것이다" 로 문장을 자꾸 끝내지 마라.
+   - "단순한 X를 넘어 Y" · "X에서 Y로" 같은 상승 공식 금지.
+5) 이런 말로 시작하거나 끝내지 마라. AI 글의 전형이다.
+   시작: "물론입니다" · "다음은 ~입니다" · "크게 세 가지로 나눌 수 있다" · "오늘은 ~에 대해 알아보겠습니다"
+   끝: "결론적으로" · "정리하면" · "요약하자면" · "~하시길 바랍니다" · "~할 때입니다" · "도움이 되셨길"
    → 마지막은 실제로 할 말로 끝내라. 궁금한 걸 물어보라거나, 우리가 뭘 해줄 수 있다거나.
-6) 명사만 늘어놓지 말고 동사로 말해라.
-   "장비 교체 작업 진행" → "장비를 바꿔 드렸습니다".
-7) 목록을 3개씩 맞추지 마라. 2개면 2개, 4개면 4개. 억지로 3개를 채우지 마라.
-8) 사람 손 자국을 남겨라.
-   - 실제 겪은 것 한 줄(현장에서 본 것, 사장님이 한 말, 그날 상황).
-   - 완벽하게 매끄러운 글보다 살짝 투박한 게 사람 글이다.
+6) 분열문 금지. "중요한 것은 ~이다" · "핵심은 ~다" · "문제는 ~라는 점이다" → 주어-서술로 바로. "방향이 필요하다".
+7) 명사만 늘어놓지 말고 동사로 말해라. "장비 교체 작업 진행" → "장비를 바꿔 드렸습니다".
+   "-성/-적/-화" 한자어 명사화를 쌓지 마라. "전략적 함의" 같은 "~적 N" 체인 금지.
+8) 목록을 3개씩 맞추지 마라. 2개면 2개, 4개면 4개. "1) 2) 3)" 번호 나열보다 문장으로 풀어라.
+   블로그에서 불릿을 3블록 이상 연달아 쓰지 마라. 나열이 진짜 필요한 곳(체크리스트·비교)만.
+9) 장식을 줄여라.
+   - 대시(—) 로 부연하지 마라. 쉼표·괄호·새 문장으로. 하이픈(-)도 부연용으로 쓰지 마라.
+   - 따옴표 강조 금지. 진짜 인용(고객이 한 말)에만 따옴표.
+   - 블로그(네이버·구글)에는 이모지를 넣지 마라. 인스타·쓰레드·페이스북만 1~2개 허용.
+   - "이는 ~" · "즉" · "또한/따라서/나아가" 문두 접속사는 문단에 한 번까지.
+10) 비유·은유를 새로 만들지 마라. "적신호" · "청사진" · "신호탄" · "뿌리내리다" 같은 사전 은유 금지. 그냥 사실을 써라.
+11) 사람 손 자국을 남겨라. 실제 겪은 것 한 줄(현장에서 본 것, 사장님이 한 말, 그날 날씨나 상황).
+    완벽하게 매끄러운 글보다 살짝 투박한 게 사람 글이다.
 `;
 
 /* ══════════════ 노출(SEO · AEO · GEO) ══════════════
    SEO = 검색엔진 순위. AEO = 답변으로 뽑히기. GEO = AI 검색에 인용되기.
    셋은 요구가 다르다. AI 검색은 "질문에 바로 답한 짧은 문단"을 통째로 인용해 간다. */
 const SEO_GUIDE = `
-[검색·AI 노출 — 반드시 지킬 것]
+[검색·AI 노출(SEO·AEO·GEO) — 반드시 지킬 것]
 1) 제목: 지역 + 무엇 + 누구를 위한 것인지가 드러나야 한다.
    - 사람이 실제로 검색창에 치는 말로 써라. "대구 사무실 NAS 설치" 처럼.
    - 낚시 제목 금지. 제목과 본문이 다르면 순위가 떨어진다.
 2) 첫 문단 안에 핵심 키워드가 나와야 한다. 인사말로 세 줄을 낭비하지 마라.
-3) 질문을 소제목으로 써라. 사람들이 검색창에 치는 문장 그대로.
+3) 소제목은 라벨이 아니라 다음 문단을 읽게 만드는 문장이다. 절반 이상은 질문을 소제목으로: 사람들이 검색창에 치는 문장 그대로.
    예) "NAS 용량은 얼마나 필요할까요?" "설치까지 며칠 걸리나요?"
+   나머지는 경고형("이 설정 하나 빼먹으면 백업이 안 됩니다")·숫자형·경험형·결과형·반전형을 섞어라. 밋밋한 명사 소제목("NAS 소개") 금지.
 4) ★ 질문 바로 아래 첫 문단은 40~60자로 답부터 하라. 배경 설명은 그 다음이다.
    AI 검색(ChatGPT·퍼플렉시티·구글 AI 개요)은 이 문단을 통째로 인용한다.
    답을 문단 끝에 숨기면 인용되지 않는다.
-5) 인용되려면 사실이 또렷해야 한다.
-   - 숫자를 넣어라. "빠릅니다" 가 아니라 "5분이면 됩니다".
-   - 지역·업체명·모델명을 문장 안에 그대로 써라. AI 가 누구 얘기인지 알 수 있게.
-   - 근거 없는 단정 금지. 모르면 모른다고 써라. 틀린 문장이 인용되면 더 손해다.
-6) 글 끝에 자주 묻는 질문 2~3개를 질문/답 형태로 붙여라(짧은 채널은 제외).
-7) 해시태그·키워드는 지역·모델·증상 위주로. 뜬구름 잡는 말은 빼라.
+5) ★ 인용되는 문단은 혼자 읽혀도 뜻이 통해야 한다(GEO 핵심).
+   - 문단 첫 문장에 주어를 분명히. "이것은" · "그 장비는" 같은 지시어로 시작하지 마라. "시놀로지 DS925+는" 처럼.
+   - 글에 한 번은 정의문을 넣어라. "NAS는 사무실 자료를 한곳에 모아 두는 저장 장치다" 처럼 한 줄로.
+   - 숫자를 넣어라. "빠릅니다" 가 아니라 "5분이면 됩니다". 숫자에는 조건을 붙여라(용량·대수·기간).
+   - 근거가 있으면 출처를 이름으로 써라(제조사 안내, 현장 계측 등). 근거 없는 단정 금지. 틀린 문장이 인용되면 더 손해다.
+   - 기준 시점을 한 번 밝혀라. "2026년 9월 기준" 처럼. AI 검색은 최신 글을 고른다.
+6) "한별시스템" 과 "대구" 가 사실 문장 안에 같이 한 번은 나와야 한다. 회사소개가 아니라 사실 문장으로.
+   예) "한별시스템이 대구 달서구 사무실에 설치한 DS925+는 ~".
+7) 글 끝에 자주 묻는 질문 2~3개를 "Q. 질문 / A. 답" 형태로 붙여라(짧은 채널은 제외). 답은 두 문장 이내.
+8) 짧은 채널(인스타·쓰레드·페이스북)은 위 4)~6) 대신, 혼자 읽혀도 뜻이 통하는 사실 문장을 하나 넣어라.
+9) 해시태그·키워드는 지역·모델·증상 위주로. 뜬구름 잡는 말은 빼라.
 `;
+
+/* ══════════════ 블로그 도입부 · 흐름 · 마무리 ══════════════
+   정보는 좋은데 첫 부분에서 이탈하는 문제를 잡는다. 사장님 지시(2026-09-06). */
+const HOOK_GUIDE = `
+[블로그 도입부 · 흐름 · 마무리 — 반드시 지킬 것]
+1) 첫 문단은 훅이다. 독자가 "이거 내 이야기인데?" 하고 멈추게 만들어라. 첫 3문장 안에서 승부가 난다.
+   아래 중 하나 이상으로 연다. 회사 인사로 열지 마라.
+   - 독자가 공감할 만한 고민 ("월요일 아침에 공유폴더가 안 열리면 하루가 꼬입니다")
+   - 의외의 사실이나 반전 ("NAS 고장의 절반은 하드가 아니라 전원 문제였습니다")
+   - "나도 그런데" 싶은 상황 (현장에서 실제로 본 장면 한 줄)
+   - 이 글을 읽으면 얻는 결과 ("10분이면 우리 사무실에 맞는 용량이 나옵니다")
+   과장·낚시 금지. 실제 블로그에서 쓰는 말투로. 서론은 4~6문장. 첫 문장은 강하고 구체적으로.
+   서론 흐름: 독자의 문제 짚기 → 감정적 공감 → 흔한 생각에 의문 제기 → 이 글에서 해결할 내용 예고 → 계속 읽어야 하는 이유.
+2) 훅 다음에 "한별시스템입니다" 인사는 한 줄이면 된다. 그 뒤로 바로 정보.
+3) 흐름: 문단마다 다음 문단이 궁금해지게 끝내라. 질문을 던지고 다음 소제목에서 답하는 식으로.
+   같은 말을 되풀이해 분량을 채우지 마라. 사례·숫자·비교·체크리스트로 채워라.
+4) 마지막 문단은 자연스러운 행동 유도(CTA)로 끝낸다. 광고 문구가 아니라 대화처럼.
+   - 독자의 경험을 댓글로 물어라 ("여러분 사무실은 백업 어떻게 하고 계세요? 댓글로 남겨 주시면 같이 봐드릴게요")
+   - 또는 이어서 읽을 글을 권해라 ("NAS 용량 고르는 법은 다음 글에서 이어집니다")
+   그 다음 줄에 상호·전화번호 한 줄, 그 다음 해시태그.
+`;
+
+/* ══════════════ 모바일 가독성 · 저장되는 구조 ══════════════
+   네이버·구글 블로그는 모바일에서 읽힌다. 사장님 프롬프트 #03·#13 반영. */
+const READABILITY = `
+[모바일 가독성 · 저장되는 구조 — 블로그]
+- 문단은 2~3문장까지. 긴 문장은 둘로 나눠라. 모바일 화면에서 한 문단이 5줄을 넘기면 안 읽는다.
+- 소제목은 자연스러운 전환 지점마다. 긴 나열은 불릿이나 번호로(단 나열이 진짜 필요한 곳만).
+- 글 중간에 한 번은 "사람들이 자주 하는 실수와 해결" 을 넣어라. 저장하게 만드는 건 이 부분이다.
+- CTA 앞에 한눈에 다시 볼 수 있는 핵심 요약(체크리스트 3~5줄)을 넣어라.
+- 반복되는 표현은 지워라. 같은 뜻을 두 번 말하지 마라.
+`;
+
+const PLAN_DELIM = "===기획메모===";   // 기획 메모 구분선. splitPlan() 이 여기서 자른다.
+
+/* ══════════════ 블로그 기획 메모 ══════════════
+   본문 뒤에 PLAN_DELIM 로 분리해 붙인다. 발행 본문에는 안 들어간다. 사장님 프롬프트 #01·#05·#10·#13 반영. */
+const PLAN_GUIDE_BLOG = `
+[기획 메모 — 본문 다음에 붙일 것]
+본문을 다 쓴 뒤 한 줄 띄우고 정확히 "${PLAN_DELIM}" 라고 쓴 줄을 넣고, 그 아래 기획 메모를 적어라(발행되지 않는다. 사장님이 보는 것).
+- 썸네일 문구 Top 3: 각 15~20자. 호기심형·숫자형·손해회피형·결과형 중 서로 다른 유형으로. 허위·낚시 금지.
+- 제목 후보 5개: 메인 키워드를 앞쪽에. 호기심·숫자·손해회피·경험·비교·결과 중 다른 유형으로 한 줄씩. 본문에 쓴 제목 포함.
+- 가장 약한 소제목 1개와 대안 2개.
+- 댓글·공유 유도 문장 3개: '공유해주세요' 말고 실제 행동으로 이어지는 말.
+- 메인 키워드 1개 · 세부 키워드 5~8개.
+`;
+
+/* ══════════════ 짧은 채널 기획 메모 ══════════════
+   인스타·쓰레드는 본문 뒤에 기획 메모를 붙인다. 서버가 PLAN_DELIM 에서 잘라 plan 필드로 분리하므로
+   발행 본문에는 섞이지 않는다. 사장님 지시(2026-09-06). */
+const PLAN_GUIDE = `
+[기획 메모 — 본문 다음에 붙일 것]
+본문을 다 쓴 뒤 한 줄 띄우고 정확히 "${PLAN_DELIM}" 라고 쓴 줄을 넣고, 그 아래 기획 메모를 적어라(발행되지 않는다. 사장님이 보는 것).
+- 메인 키워드: 1개
+- 세부 키워드: 함께 쓸 것 5~10개 (쉼표 구분)
+- 제목(첫 줄) 후보 5개: 검색 의도를 반영해 각각 다른 각도로. 번호 붙여 한 줄씩
+- 본문 구조: 어떤 순서로 무엇을 말했는지 3~5줄
+- 꼭 다룰 내용: 독자가 실제로 궁금해하는 질문 2~3개와 그 답의 요지
+- 소개 문구: 검색 결과·피드에서 클릭하고 싶게 만드는 한 줄 (40자 이내)
+- 추천 태그: 해시태그 후보 (본문에 쓴 것 + 대안)
+키워드를 억지로 반복하지 마라. 독자가 실제로 궁금해하는 질문에 답하는 글이 되게 하라.
+`;
+
+/* ══════════════ 짧은 채널(인스타·쓰레드·페북·유튜브) 전용 ══════════════
+   블로그용 규칙(소제목·Q&A·4000자)이 짧은 채널에 섞이면 haiku 가 블로그를 써 버린다(2026-09-06 실측 1,582자).
+   그래서 짧은 채널은 노출 규칙·유형 가이드를 따로 짧게 준다. */
+const SEO_GUIDE_SHORT = `
+[검색·AI 노출 — 짧은 채널]
+1) 첫 두 줄에 지역·장비·증상 같은 실제 검색어를 문장 안에 넣어라(해시태그 말고 본문에).
+2) 혼자 읽혀도 뜻이 통하는 사실 문장을 하나 넣어라. 주어 분명, 숫자 하나. "한별시스템이 대구 달서구 사무실에 설치한 DS925+는 ~" 처럼.
+3) 제목 줄·소제목·Q&A·표·마크다운(#, ##, **, ==) 금지. 캡션은 줄글이다.
+4) 해시태그는 지역·모델·증상 위주. 뜬구름 잡는 말은 빼라.
+`;
+// 짧은 채널 본문 한도(해시태그 제외). buildPrompt 의 절대 규칙 + finishText 의 압축 판정이 같이 쓴다.
+const CHANNEL_LIMITS: Record<string, { body: number; lines?: number; tags?: string }> = {
+  instagram: { body: 250, lines: 6, tags: "8~12개" },
+  threads:   { body: 450 },
+};
+const TYPE_GUIDE_SHORT: Record<string, string> = {
+  review: "글 유형: 후기형 — 현장 한 장면 → 뭘 했나 → 달라진 것 한 줄.",
+  guide:  "글 유형: 가이드형 — 고르는 기준 하나 또는 점검 항목 2~3개(저장하고 싶게).",
+  case:   "글 유형: 사례형 — 어떤 사업장이 뭘 겪었고 어떻게 풀었나, 세 줄.",
+  ad:     "글 유형: 광고형(SNS광고) — 훅→무엇을 누구에게→구체적 이득→조건 명시→행동 유도.",
+};
 
 const CHANNEL_AGENTS: Record<string, string> = {
   naver: `[채널] 네이버 블로그 — 검색 유입 최대화 + B2B 신뢰.
 - 제목: 지역+핵심키워드를 맨 앞에. 글유형에 맞는 공식(후기/가이드/사례). 모델명 정확히.
-- 본문: '안녕하세요, ${COMPANY.name}입니다.'로 시작 → 고객 어려움 공감 → 함께 찾은 해결 → 결과의 안심.
+- 본문: 첫 문단은 훅([블로그 도입부] 규칙). '${COMPANY.name}입니다' 인사는 훅 다음 한 줄. → 고객 어려움 공감 → 함께 찾은 해결 → 결과의 안심.
 - 분량 3,800~4,200자 (한글 기준, 공백 포함). 길이를 채우기 위해 같은 말을 반복하지 말고 구체적 사례·수치·체크리스트·Q&A·비교표 등으로 자연스럽게 확장.
 - 핵심 키워드 5~8회 자연 반복.
-- 끝에 오시는 길/연락처(도움 톤) + 해시태그 10~15개(#지역+키워드, #키워드, #모델명, #${COMPANY.name}).`,
+- 끝: 댓글·다음 글 CTA 문단 → 상호·전화(도움 톤) 한 줄 → 해시태그 10~15개(#지역+키워드, #키워드, #모델명, #${COMPANY.name}).`,
 
   google: `[채널] 구글 블로그(Blogger) — 구글 SEO + 영문 병기.
 - 제목: "[지역] [키워드] — [고객문제], 함께 해결한 이야기 | ${COMPANY.name}". 영문 모델/브랜드 병기(Synology, Kyocera 등).
 - 소제목(##, ###)으로 구조화. 본문은 고객 어려움→공감→해결→돕는 톤 회사 소개.
+- 서식 마커(발행 때 HTML 로 바뀐다): 강조할 낱말은 **굵게**, 한 줄로 기억할 핵심 답 문장은 ==형광펜== 으로 글당 2~3개만. 고객이 한 말은 > 인용 줄로. 체크리스트만 - 불릿.
 - 분량 3,800~4,200자 (한글 기준, 공백 포함). 채우기 위한 반복 금지 — 소제목별로 구체적 사례·비교·체크리스트·Q&A·기술 배경 설명으로 자연스럽게 확장.
 - 끝에 "Keywords:" 줄로 한글+영문 키워드 나열. 해시태그 포함.`,
 
@@ -122,11 +222,12 @@ const CHANNEL_AGENTS: Record<string, string> = {
 - 설명: 한줄요약(어려움→해결) → 상세 → 타임스탬프 4~6개 → 돕는 톤 회사소개 → ☎${COMPANY.tel}.
 - 해시태그 10개 + 검색태그(쉼표) 별도.`,
 
-  instagram: `[채널] 인스타그램 — 짧고 시각적.
+  instagram: `[채널] 인스타그램 — 짧게. 길면 아무도 안 읽는다.
+- ★ 본문(해시태그 제외) 250자 이내, 줄 수 6줄 이내. 넘기면 실패다. 긴 설명은 블로그 몫이다.
 - 첫 줄: 고객 어려움 한 줄(후킹, 이모지 1개). 검색에도 걸리게 지역·장비 이름을 첫 줄에 넣어라.
 - 2~3줄 공감+해결 요약. "사세요"보다 "이게 맞을까요? 같이 봐드려요" 톤.
-- 위치+☎${COMPANY.tel}(상담 무료) 1줄.
-- 끝에 . 줄바꿈 . 후 해시태그 15~20개(대형·소형 혼합).
+- ☎${COMPANY.tel}(상담 무료) 1줄.
+- 끝에 . 줄바꿈 . 후 해시태그 8~12개(대형·소형 혼합). 15개 넘기지 마라.
 - [노출] 인스타 검색은 해시태그만 보지 않는다. 캡션의 첫 두 줄도 읽는다.
   '대구', 'NAS', 모델명 같은 실제 검색어를 캡션 안 문장에 자연스럽게 넣어라.
 - [노출] 저장·공유가 노출을 키운다. 나중에 다시 볼 만한 것을 한 줄 넣어라
@@ -202,7 +303,11 @@ interface GenInput {
 function buildPrompt(p: GenInput): string {
   const agent = CHANNEL_AGENTS[p.channel];
   if (!agent) throw new Error("알 수 없는 채널: " + p.channel);
-  const typeGuide = TYPE_GUIDE[p.postType ?? ""] || TYPE_GUIDE.review;
+  const isBlog = p.channel === "naver" || p.channel === "google";
+  const isShort = p.channel === "instagram" || p.channel === "threads";
+  const typeGuide = isBlog
+    ? (TYPE_GUIDE[p.postType ?? ""] || TYPE_GUIDE.review)
+    : (TYPE_GUIDE_SHORT[p.postType ?? ""] || TYPE_GUIDE_SHORT.review);
 
   const imageBlock = p.imageDesc ? `
 [첨부 사진 분석 결과]
@@ -263,13 +368,18 @@ ${AD_GUIDE}
 - 대상: ${p.adTarget || "(미지정 — 대구·경북 사업장으로 가정)"}
 - 원하는 행동: ${p.adCta || "전화 문의"}` : "";
 
+  const lim = CHANNEL_LIMITS[p.channel];
+  const limitLine = lim
+    ? `\n[길이 — 절대 규칙] 본문(해시태그 제외) ${lim.body}자 이내${lim.lines ? `, ${lim.lines}줄 이내` : ""}. 제목 줄·소제목·Q&A 없이 캡션 하나만. 넘기면 실패다.`
+    : "";
   return `${PHILOSOPHY}
 
 ${HUMAN_VOICE}
 
-${SEO_GUIDE}
-
+${isBlog ? SEO_GUIDE : SEO_GUIDE_SHORT}
+${isBlog ? HOOK_GUIDE + READABILITY : ""}
 ${agent}
+${isShort ? PLAN_GUIDE : isBlog ? PLAN_GUIDE_BLOG : ""}
 
 ${typeGuide}
 ${adBlock}
@@ -287,7 +397,7 @@ ${histBlock}
 - 한 일/핵심 메시지: ${p.seed || "(미지정)"}
 ${kwBlock}
 
-위 입력값과 채널 지침에 따라, 바로 발행 가능한 완성된 글 1편을 한국어로 작성하세요. 설명이나 머리말 없이 본문만 출력하세요.`;
+위 입력값과 채널 지침에 따라, 바로 발행 가능한 완성된 글 1편을 한국어로 작성하세요. 설명이나 머리말 없이 본문만 출력하세요.${limitLine}${(isShort || isBlog) ? ` 본문 뒤에 "${PLAN_DELIM}" 줄과 기획 메모를 붙이세요.` : ""}`;
 }
 
 // ── 모델 라이트사이징(비용 절감) ─────────────────────────────
@@ -337,6 +447,138 @@ async function callClaude(prompt: string, model = "claude-sonnet-5") {
     text: d.content.map((c: { text: string }) => c.text).join(""),
     usage: { model, input_tokens: inTok, output_tokens: outTok, usd: +usd.toFixed(5) },
   };
+}
+
+// ── 생성 후처리 ─────────────────────────────────────────────
+// 1) splitPlan: 짧은 채널의 기획 메모를 본문에서 떼어낸다(발행 본문 오염 방지)
+// 2) postClean: 대시(—)→하이픈, 챗봇 머리·꼬리 제거 (규칙 기반, 토큰 0)
+// 3) humanizePass: im-not-ai 룰북으로 haiku 1콜 재윤문. 내용·숫자·마커 보존, 문체만.
+//    인스타·쓰레드는 이 콜에서 길이 제한(CHANNEL_LIMITS)도 같이 맞춘다.
+
+function splitPlan(raw: string): { text: string; plan: string } {
+  const i = raw.indexOf(PLAN_DELIM);
+  if (i < 0) return { text: raw.trim(), plan: "" };
+  return { text: raw.slice(0, i).trim(), plan: raw.slice(i + PLAN_DELIM.length).trim() };
+}
+
+function postClean(text: string): string {
+  let t = text.replace(/\r/g, "");
+  t = t.replace(/[—–]/g, "-");                                   // em/en dash 금지(사이트 규칙과 동일)
+  t = t.replace(/^\s*(물론입니다[.!]?|네[,.]? 알겠습니다[.!]?|다음은 .{0,40}입니다[.:]?)\s*\n+/u, "");
+  t = t.replace(/\n+\s*(도움이 되셨길 바랍니다[.!]?|추가 질문이 있으시면 .{0,40})\s*$/u, "");
+  return t.trim();
+}
+
+// 본문(해시태그 제외) 글자 수. 인스타·쓰레드 길이 판정용.
+function bodyLength(text: string): { body: number; lines: number } {
+  const bodyLines: string[] = [];
+  for (const ln of text.split("\n")) {
+    const t = ln.trim();
+    if (/^(#[^\s#]+\s*)+$/.test(t)) continue;   // 해시태그만 있는 줄
+    if (t === "." || t === "") continue;
+    bodyLines.push(t);
+  }
+  return { body: bodyLines.join("").length, lines: bodyLines.length };
+}
+
+const HUMANIZE_RULES = `
+[윤문 규칙 — humanize-korean v2.3 핵심]
+- 쉼표: 한 문장 최대 1개. 연결어미(-고/-며/-지만/-면서/-아서) 뒤 쉼표 제거. 새 쉼표를 만들지 마라.
+- 번역투: "~에 대해"→"~을", "~를 통해"→"~로", "~에 있어서"→"~에서", "가지고 있다"→"있다", "되어진다"→"된다", "~에 의해"→행위자 주어.
+- "할 수 있다" 4회+ → 일부만 다른 표현으로. 단정으로 바꾸지 마라(서법 보존).
+- AI 관용구 삭제·치환: 결론적으로/정리하면/요약하자면/이를 통해/시사하는 바/주목할 만/크게 N가지로/~할 때입니다/~하는 이유다/중요한 것은 ~이다/핵심은 ~다.
+- hype 어휘(혁신적·획기적·압도적·다양한·효과적·중요하다·필수적) → 구체 사실로.
+- "~것이다/~일 것이다" 연속 3회+ → 일부만 "~다".
+- 종결어미 4문장 연속 같으면 변주. 문장 길이 들쭉날쭉하게(단문 1~2 + 장문 1).
+- 대시(—) 부연 → 쉼표·괄호·새 문장. 따옴표 강조 제거(진짜 인용만).
+- "-성/-적/-화" 명사화 체인 → 동사·형용사로. "~적 N" 3회+ 풀어쓰기.
+- 사전 은유(적신호·청사진·신호탄·뿌리내리다·잠식) → 명제로. 새 비유를 만들지 마라.
+- 문두 접속사(또한/따라서/즉/나아가) 한 문단 3회+ → 절반 제거.
+[절대 보존] 고유명사·모델명·전화번호·숫자·날짜·단위·해시태그·[📷 사진 N — …]·[🎬 영상 N — …] 마커·**굵게**·==형광펜==·"> 인용"·"## 소제목" 서식·Q./A. 구조·줄바꿈 구조. 내용 앵커(주장을 이루는 명사)는 원형 그대로 남긴다. 변경률 30% 이내. 격식체는 격식체로, 구어체는 구어체로.
+[금지] 내용 추가·삭제, 문단 순서 변경, 없던 주장 삽입, 설명·머리말 출력.
+`;
+
+async function humanizePass(text: string, channel: string): Promise<{ text: string; usage: { usd: number; input_tokens: number; output_tokens: number } } | null> {
+  if (!text || text.length < 40) return null;
+  const lim = CHANNEL_LIMITS[channel];
+  const cur = bodyLength(text);
+  const overNow = !!lim && (cur.body > lim.body || (!!lim.lines && cur.lines > lim.lines));
+  const lengthRule = lim
+    ? `\n[길이] 이 채널은 본문(해시태그 제외) ${lim.body}자 이내${lim.lines ? `, ${lim.lines}줄 이내` : ""}다. 지금 ${cur.body}자·${cur.lines}줄. ${overNow ? "넘쳤다. 문장을 지워서 맞춰라(뜻이 겹치는 문장·수식어부터). 첫 줄 훅과 전화번호 줄은 남긴다." : "범위 안이다. 늘리지 마라."}${lim.tags ? ` 해시태그는 ${lim.tags}. 넘치면 뒤에서부터 지운다.` : ""}`
+    : "";
+  const prompt = `당신은 한국어 윤문가다. 아래 글에서 AI가 쓴 흔적만 지운다. 사실·내용·구조는 그대로, 문체만 사람 손으로 쓴 것처럼.
+${HUMANIZE_RULES}${lengthRule}
+
+윤문한 글 전체만 출력한다. 설명·머리말·요약 금지.
+
+<원문>
+${text}
+</원문>`;
+  try {
+    const r = await callClaude(prompt, "claude-haiku-4-5");
+    let out = r.text.trim();
+    out = out.replace(/^<윤문>\s*/, "").replace(/\s*<\/윤문>$/, "").replace(/^<원문>\s*/, "").replace(/\s*<\/원문>$/, "");
+    // 안전장치: 마커 개수·전화번호가 사라졌거나 반 토막이 났으면 원문 유지
+    const cnt = (t: string, re: RegExp) => (t.match(re) || []).length;
+    const lostMarker = cnt(out, /\[📷/g) !== cnt(text, /\[📷/g) || cnt(out, /\[🎬/g) !== cnt(text, /\[🎬/g);
+    const lostTel = text.includes(COMPANY.tel) && !out.includes(COMPANY.tel);
+    const tooShort = out.length < text.length * (overNow ? 0.25 : 0.5);
+    if (!out || lostMarker || lostTel || tooShort) return { text, usage: r.usage };
+    return { text: out, usage: r.usage };
+  } catch (_e) {
+    return null;  // 2차 패스 실패는 원문으로 조용히 진행(생성 자체를 막지 않는다)
+  }
+}
+
+// 한도 초과 캡션 압축(haiku 1콜). 2차 다듬기로도 못 줄였을 때만 돈다.
+async function condensePass(text: string, channel: string): Promise<{ text: string; usage: { usd: number; input_tokens: number; output_tokens: number } } | null> {
+  const lim = CHANNEL_LIMITS[channel];
+  if (!lim) return null;
+  const cur = bodyLength(text);
+  const prompt = `아래 글은 ${channel === "instagram" ? "인스타그램 캡션" : "쓰레드 글"}인데 너무 길다(본문 ${cur.body}자·${cur.lines}줄). 본문(해시태그 제외) ${lim.body}자 이내${lim.lines ? `, ${lim.lines}줄 이내` : ""}로 압축하라.
+- 제목 줄·소제목·Q&A·마크다운(#, ##, **, ==, ---)·구분선은 전부 지운다. 캡션은 줄글이다.
+- 첫 줄 훅, 전화번호 ${COMPANY.tel} 줄, 해시태그 줄(${lim.tags || "그대로"})은 남긴다. 해시태그가 15개를 넘으면 뒤에서부터 지운다.
+- 사실·모델명·숫자·지역은 보존. 새 내용을 넣지 마라. [📷 사진 N] 마커가 있으면 첫 번째 하나만 남긴다.
+- 사람이 쓴 말투 그대로. 쉼표 최소. "결론적으로/정리하면" 금지.
+압축한 캡션만 출력한다. 설명 금지.
+
+<원문>
+${text}
+</원문>`;
+  try {
+    const r = await callClaude(prompt, "claude-haiku-4-5");
+    const out = r.text.trim().replace(/^<[^>]+>\s*/, "").replace(/\s*<\/[^>]+>$/, "");
+    if (!out || out.length < 30) return { text, usage: r.usage };
+    return { text: out, usage: r.usage };
+  } catch (_e) {
+    return null;
+  }
+}
+
+// 생성 결과 마무리: 기획 메모 분리 → 규칙 정리 → (옵션) 2차 다듬기 → 한도 초과면 압축. usage 는 합산.
+async function finishText(raw: string, channel: string, humanize = true) {
+  const { text: t0, plan: plan0 } = splitPlan(raw);
+  let text = postClean(t0);
+  const plan = plan0.replace(/[—–]/g, "-");
+  const extra = { usd: 0, input_tokens: 0, output_tokens: 0 };
+  const add = (u: { usd: number; input_tokens: number; output_tokens: number }) => { extra.usd += u.usd; extra.input_tokens += u.input_tokens; extra.output_tokens += u.output_tokens; };
+  if (humanize) {
+    const h = await humanizePass(text, channel);
+    if (h) { text = postClean(h.text); add(h.usage); }
+  }
+  const lim = CHANNEL_LIMITS[channel];
+  if (lim && bodyLength(text).body > lim.body) {
+    const c = await condensePass(text, channel);
+    if (c) { text = postClean(c.text); add(c.usage); }
+  }
+  const len = bodyLength(text);
+  const over = lim ? len.body > lim.body : false;
+  return { text, plan, extra: { usd: +extra.usd.toFixed(5), input_tokens: extra.input_tokens, output_tokens: extra.output_tokens }, len, over };
+}
+
+type Usage = { model: string; input_tokens: number; output_tokens: number; usd: number };
+function mergeUsage(u: Usage, extra: { usd: number; input_tokens: number; output_tokens: number }) {
+  return { ...u, input_tokens: u.input_tokens + extra.input_tokens, output_tokens: u.output_tokens + extra.output_tokens, usd: +(u.usd + extra.usd).toFixed(5), humanized: extra.usd > 0 };
 }
 
 async function analyzeImages(images: { media_type?: string; data: string }[]) {
@@ -391,14 +633,43 @@ function escHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-// 평문 본문 → Blogger용 간단 HTML.
-// images 가 있으면 [📷 사진 N — ...] 마커 자리에 순서대로 <img> data: URL 인라인 삽입.
+// ── 글 스타일 프리셋 (폰트·색상) ─────────────────────────────
+// 구글 블로그 발행 HTML 에 적용. 콘솔에서 고르거나 'random' 이면 글마다 다른 프리셋.
+// 폰트는 Google Fonts @import + 기기 기본 한글 폰트 폴백(블로거가 style 을 지워도 읽힌다).
+interface StylePreset { id: string; name: string; family: string; gf: string; heading: string; accent: string; hl: string; quoteBg: string; }
+const STYLE_PRESETS: StylePreset[] = [
+  { id: "gothic-blue",   name: "깔끔 고딕 · 파랑",   family: "'Noto Sans KR','Malgun Gothic','Apple SD Gothic Neo',sans-serif",        gf: "Noto+Sans+KR:wght@400;700",   heading: "#1a4fa3", accent: "#d9480f", hl: "#fff3bf", quoteBg: "#eef3fb" },
+  { id: "myeongjo-warm", name: "따뜻한 명조 · 갈색", family: "'Nanum Myeongjo','Batang',serif",                                         gf: "Nanum+Myeongjo:wght@400;700",  heading: "#6b3e26", accent: "#b7791f", hl: "#fdebd0", quoteBg: "#f8f1e7" },
+  { id: "gowun-green",   name: "고운돋움 · 초록",     family: "'Gowun Dodum','Malgun Gothic','Apple SD Gothic Neo',sans-serif",         gf: "Gowun+Dodum",                  heading: "#2f6f4f", accent: "#c2410c", hl: "#e6f4ea", quoteBg: "#eef7f1" },
+  { id: "plex-teal",     name: "IBM Plex · 청록",     family: "'IBM Plex Sans KR','Malgun Gothic','Apple SD Gothic Neo',sans-serif",    gf: "IBM+Plex+Sans+KR:wght@400;600", heading: "#0f766e", accent: "#be123c", hl: "#ccfbf1", quoteBg: "#f0fdfa" },
+  { id: "batang-navy",   name: "고운바탕 · 남색",     family: "'Gowun Batang','Batang',serif",                                          gf: "Gowun+Batang:wght@400;700",    heading: "#3b3b6b", accent: "#9f1239", hl: "#fde2e4", quoteBg: "#f2f2f8" },
+  { id: "a1-black",      name: "고딕A1 · 검정",       family: "'Gothic A1','Malgun Gothic','Apple SD Gothic Neo',sans-serif",           gf: "Gothic+A1:wght@400;700",       heading: "#111827", accent: "#2563eb", hl: "#dbeafe", quoteBg: "#f3f4f6" },
+  { id: "nanum-orange",  name: "나눔고딕 · 주황",     family: "'Nanum Gothic','Malgun Gothic','Apple SD Gothic Neo',sans-serif",        gf: "Nanum+Gothic:wght@400;700",    heading: "#c2410c", accent: "#1d4ed8", hl: "#ffedd5", quoteBg: "#fff7ed" },
+  { id: "serif-plum",    name: "노토명조 · 자주",     family: "'Noto Serif KR','Batang',serif",                                         gf: "Noto+Serif+KR:wght@400;700",   heading: "#701a75", accent: "#0e7490", hl: "#fae8ff", quoteBg: "#fdf4ff" },
+];
+function pickStyle(sel?: { preset?: string } | string): StylePreset {
+  const id = typeof sel === "string" ? sel : sel?.preset;
+  const found = id && id !== "random" ? STYLE_PRESETS.find((x) => x.id === id) : undefined;
+  return found || STYLE_PRESETS[Math.floor(Math.random() * STYLE_PRESETS.length)];
+}
+
+// 인라인 마커 → HTML. escHtml 이 끝난 문자열에 적용한다.
+function inlineMd(escaped: string, st: StylePreset): string {
+  return escaped
+    .replace(/\*\*(.+?)\*\*/g, `<strong style="color:${st.accent}">$1</strong>`)
+    .replace(/==(.+?)==/g, `<mark style="background:${st.hl};color:inherit;padding:0 4px;border-radius:3px">$1</mark>`);
+}
+
+// 평문 본문 → Blogger용 HTML. 스타일 프리셋(폰트·색상) + 마크다운 비슷한 마커(##, ###, >, -, **, ==) 변환.
+// images 가 있으면 [📷 사진 N — ...] 마커 자리에 순서대로 <img> 삽입.
 // 마커보다 사진이 많으면 본문 끝에 추가. 마커가 많으면 남은 자리는 placeholder 박스 유지.
 function textToBloggerHtml(
   text: string,
   images: { media_type?: string; data?: string; url?: string }[] = [],
   videos: { url: string; caption?: string }[] = [],
+  style?: StylePreset,
 ): string {
+  const st = style || STYLE_PRESETS[0];
   // 사진은 Storage URL(im.url) 우선, 없으면 base64(im.data)
   const srcOf = (im: { media_type?: string; data?: string; url?: string }) =>
     im.url ? im.url : `data:${im.media_type || "image/jpeg"};base64,${im.data}`;
@@ -458,8 +729,43 @@ function textToBloggerHtml(
       const caption = trimmed.replace(/<!--\/?VIDPH-->/g, "").trim();
       return `<div style="border:2px dashed #ccc;border-radius:10px;padding:24px 12px;text-align:center;color:#aaa;margin:14px 0;font-size:13px">🎬 ${escHtml(caption)}</div>`;
     }
-    return `<p>${escHtml(trimmed).replace(/\n/g, "<br/>")}</p>`;
+    // ── 서식 마커 ──
+    if (/^##\s+/.test(trimmed)) {
+      const lvl = /^###\s+/.test(trimmed) ? 3 : 2;
+      const t = inlineMd(escHtml(trimmed.replace(/^#{2,3}\s+/, "")), st);
+      return lvl === 2
+        ? `<h2 style="font-size:1.3em;font-weight:700;color:${st.heading};margin:30px 0 12px;padding-left:12px;border-left:4px solid ${st.accent};line-height:1.4">${t}</h2>`
+        : `<h3 style="font-size:1.12em;font-weight:700;color:${st.heading};margin:22px 0 8px;line-height:1.4">${t}</h3>`;
+    }
+    if (/^&gt;\s|^>\s/.test(trimmed) || trimmed.split("\n").every((l) => /^>\s?/.test(l.trim()))) {
+      const inner = trimmed.split("\n").map((l) => l.trim().replace(/^>\s?/, "")).join("<br/>");
+      return `<blockquote style="margin:16px 0;padding:12px 16px;background:${st.quoteBg};border-left:4px solid ${st.accent};border-radius:6px;color:#333">${inlineMd(escHtml(inner.replace(/<br\/>/g, "\u0001")), st).replace(/\u0001/g, "<br/>")}</blockquote>`;
+    }
+    const lines = trimmed.split("\n").map((l) => l.trim());
+    if (lines.length >= 2 && lines.every((l) => /^[-•]\s+/.test(l))) {
+      return `<ul style="margin:10px 0 16px;padding-left:22px">${lines.map((l) => `<li style="margin:4px 0">${inlineMd(escHtml(l.replace(/^[-•]\s+/, "")), st)}</li>`).join("")}</ul>`;
+    }
+    if (lines.length >= 2 && lines.every((l) => /^\d+[.)]\s+/.test(l))) {
+      return `<ol style="margin:10px 0 16px;padding-left:22px">${lines.map((l) => `<li style="margin:4px 0">${inlineMd(escHtml(l.replace(/^\d+[.)]\s+/, "")), st)}</li>`).join("")}</ol>`;
+    }
+    if (/^(#[^\s#]+\s*)+$/.test(trimmed.replace(/\n/g, " "))) {
+      return `<p style="margin:18px 0 0;font-size:0.9em;color:${st.accent}">${escHtml(trimmed.replace(/\n/g, " "))}</p>`;
+    }
+    if (/^Keywords?\s*:/i.test(trimmed)) {
+      return `<p style="margin:14px 0 0;font-size:0.85em;color:#888">${escHtml(trimmed)}</p>`;
+    }
+    const body = lines.map((l) => {
+      const m = l.match(/^([QA])[.:]\s*(.*)$/);   // FAQ 의 Q./A. 줄
+      if (m) return `<strong style="color:${m[1] === "Q" ? st.heading : st.accent}">${m[1]}.</strong> ${inlineMd(escHtml(m[2]), st)}`;
+      return inlineMd(escHtml(l), st);
+    }).join("<br/>");
+    return `<p style="margin:0 0 14px;line-height:1.85">${body}</p>`;
   }).filter(Boolean).join("\n");
+}
+
+// 프리셋 래퍼: 폰트 @import + 본문 div. 블로거가 <style> 을 지워도 family 폴백으로 읽힌다.
+function wrapStyled(inner: string, st: StylePreset): string {
+  return `<style>@import url('https://fonts.googleapis.com/css2?family=${st.gf}&display=swap');</style>\n<div data-hb-style="${st.id}" style="font-family:${st.family};font-size:16px;line-height:1.85;color:#222;word-break:keep-all">\n${inner}\n</div>`;
 }
 
 async function googleAccessToken(): Promise<string> {
@@ -572,13 +878,15 @@ async function publishGoogle(p: {
   isDraft?: boolean;
   images?: { media_type?: string; data?: string; url?: string }[];
   videos?: { url: string; caption?: string }[];
+  style?: { preset?: string } | string;
 }) {
   const blogId = p.blogId || GOOGLE_BLOG_ID;
   if (!blogId) throw new Error("blogId 또는 GOOGLE_BLOG_ID 시크릿이 필요합니다.");
   const accessToken = await googleAccessToken();
 
+  const st = pickStyle(p.style);
   const isHtml = /<\w+[^>]*>/.test(p.content);
-  const html = isHtml ? p.content : textToBloggerHtml(p.content, p.images || [], p.videos || []);
+  const html = isHtml ? p.content : wrapStyled(textToBloggerHtml(p.content, p.images || [], p.videos || [], st), st);
 
   const body = {
     kind: "blogger#post",
@@ -601,7 +909,7 @@ async function publishGoogle(p: {
   );
   if (!r.ok) throw new Error("Blogger publish " + r.status + ": " + (await r.text()).slice(0, 300));
   const d = await r.json();
-  return { id: d.id as string, url: d.url as string, published: d.published as string };
+  return { id: d.id as string, url: d.url as string, published: d.published as string, style: isHtml ? undefined : st.name };
 }
 
 // ──────────────────────────────────────────────
@@ -666,8 +974,10 @@ async function queueGenerate(p: QueueGenInput) {
       imageCount: p.image_count,
       videoCount: p.video_count,
     }), modelForChannel(ch));
-    out[ch] = { text: res.text, usage: res.usage };
-    totalUsd += res.usage.usd;
+    const fin = await finishText(res.text, ch, (p as { humanize?: boolean }).humanize !== false);
+    const usage = mergeUsage(res.usage, fin.extra);
+    out[ch] = { text: fin.text, plan: fin.plan, usage };
+    totalUsd += usage.usd;
   }
 
   const row = {
@@ -766,6 +1076,7 @@ async function collectBatches() {
       const jsonl = await rr.text();
       const out: Record<string, unknown> = {};
       let totalUsd = 0;
+      const finishJobs: Promise<void>[] = [];   // 2차 다듬기(haiku)는 채널별 병렬
       for (const line of jsonl.split("\n")) {
         const t = line.trim();
         if (!t) continue;
@@ -782,12 +1093,19 @@ async function collectBatches() {
           const cfg = MODEL_PRICING[priceModel] || MODEL_PRICING["claude-sonnet-5"];
           const model = msg.model || priceModel;    // 표시는 실제 응답 모델
           const usd = ((u.input_tokens || 0) / 1e6 * cfg.in + (u.output_tokens || 0) / 1e6 * cfg.out) * 0.5; // 배치 −50%
-          out[ch] = { text, usage: { model, input_tokens: u.input_tokens || 0, output_tokens: u.output_tokens || 0, usd: +usd.toFixed(5) } };
+          const baseUsage: Usage = { model, input_tokens: u.input_tokens || 0, output_tokens: u.output_tokens || 0, usd: +usd.toFixed(5) };
+          out[ch] = { text, usage: baseUsage };
           totalUsd += usd;
+          finishJobs.push((async () => {
+            const fin = await finishText(text, ch, true);
+            out[ch] = { text: fin.text, plan: fin.plan, usage: mergeUsage(baseUsage, fin.extra) };
+            totalUsd += fin.extra.usd;
+          })());
         } else {
           out[ch] = { text: "", usage: { model: modelForChannel(ch), input_tokens: 0, output_tokens: 0, usd: 0 }, error: String(res?.type || "failed") };
         }
       }
+      await Promise.all(finishJobs);
       await sbRest("PATCH", `autopost_post_queue?id=eq.${row.id}`, {
         channels: out,
         status: "pending",
@@ -1275,10 +1593,15 @@ Deno.serve(async (req: Request) => {
       });
     }
 
+    if (req.method === "GET" && sub === "/styles") {
+      return jsonResponse(200, { ok: true, styles: STYLE_PRESETS.map((x) => ({ id: x.id, name: x.name, family: x.family, heading: x.heading, accent: x.accent, hl: x.hl })) });
+    }
+
     if (req.method === "POST" && sub === "/generate") {
-      const p = await req.json() as GenInput;
+      const p = await req.json() as GenInput & { humanize?: boolean };
       const result = await callClaude(buildPrompt(p), modelForChannel(p.channel));
-      return jsonResponse(200, { ok: true, channel: p.channel, text: result.text, usage: result.usage });
+      const fin = await finishText(result.text, p.channel, p.humanize !== false);
+      return jsonResponse(200, { ok: true, channel: p.channel, text: fin.text, plan: fin.plan, usage: mergeUsage(result.usage, fin.extra), length: fin.len, over_limit: fin.over });
     }
 
     if (req.method === "POST" && sub === "/analyze-image") {
@@ -1336,6 +1659,7 @@ Deno.serve(async (req: Request) => {
         isDraft?: boolean;
         images?: { media_type?: string; data?: string; url?: string }[];
         videos?: { url: string; caption?: string }[];
+        style?: { preset?: string } | string;
       };
       if (!p.title || !p.content) {
         return jsonResponse(400, { ok: false, error: "title, content 필요" });
@@ -1348,6 +1672,7 @@ Deno.serve(async (req: Request) => {
         isDraft: p.isDraft,
         images: p.images,
         videos: p.videos,
+        style: p.style,
       });
       return jsonResponse(200, { ok: true, ...out });
     }

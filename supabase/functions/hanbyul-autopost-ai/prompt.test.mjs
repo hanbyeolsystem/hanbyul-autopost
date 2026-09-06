@@ -25,6 +25,7 @@ let code = cut("const COMPANY", "interface GenInput")
   + cut("function buildPrompt", "\n}\n") + "\n}\n";
 code = code
   .replace(/const (\w+): Record<string, string> =/g, "const $1 =")
+  .replace(/const (\w+): Record<string, \{[^}]*\}> =/g, "const $1 =")   // CHANNEL_LIMITS 같은 객체형 타입
   .replace(/function buildPrompt\(p: GenInput\): string/, "function buildPrompt(p)")
   .replace(/\bconst (\w+): string\b/g, "const $1");
 
@@ -97,14 +98,24 @@ for (const t of ["review", "guide", "case", "ad"]) {
   }
 }
 
-// ── 8) 노출 규칙(SEO·AEO·GEO)도 모든 유형에 실린다 ──
+// ── 8) 노출 규칙(SEO·AEO·GEO): 블로그는 전체본, 짧은 채널은 짧은 판(블로그 규칙이 섞이면 haiku 가 블로그를 써 버린다) ──
 {
-  const out = buildPrompt({ ...base, postType: "review" });
-  assert.ok(out.includes("[검색·AI 노출"), "노출 규칙 없음");
-  // AEO/GEO 의 핵심: 질문 아래 답부터, 40~60자
-  assert.ok(out.includes("40~60자"), "직답 문단 규칙이 없다 (AI 인용의 핵심)");
-  assert.ok(out.includes("질문을 소제목으로"), "질문형 소제목 규칙 없음");
-  assert.ok(out.includes("숫자를 넣어라"), "구체 수치 규칙 없음");
+  for (const t of ["review", "guide", "case", "ad"]) {
+    const out = buildPrompt({ ...base, channel: "naver", postType: t });
+    assert.ok(out.includes("[검색·AI 노출(SEO·AEO·GEO)"), `${t}: 블로그 노출 규칙 없음`);
+    assert.ok(out.includes("40~60자"), `${t}: 직답 문단 규칙이 없다 (AI 인용의 핵심)`);
+    assert.ok(out.includes("질문을 소제목으로"), `${t}: 질문형 소제목 규칙 없음`);
+    assert.ok(out.includes("숫자를 넣어라"), `${t}: 구체 수치 규칙 없음`);
+  }
+  for (const ch of ["instagram", "threads", "facebook", "youtube"]) {
+    const out = buildPrompt({ ...base, channel: ch, postType: "review" });
+    assert.ok(out.includes("[검색·AI 노출 — 짧은 채널]"), `${ch}: 짧은 채널 노출 규칙 없음`);
+    assert.ok(!out.includes("40~60자") && !out.includes("질문을 소제목으로"), `${ch}: 블로그 규칙이 섞였다`);
+    assert.ok(out.includes("글 유형: 후기형 — 현장 한 장면"), `${ch}: 짧은 유형 가이드 없음`);
+  }
+  const ig = buildPrompt({ ...base, channel: "instagram", postType: "review" });
+  assert.ok(ig.includes("[길이 — 절대 규칙] 본문(해시태그 제외) 250자 이내, 6줄 이내"), "인스타 절대 길이 규칙(맨 끝) 없음");
+  assert.ok(!buildPrompt({ ...base, channel: "facebook", postType: "review" }).includes("[길이 — 절대 규칙]"), "페북에 길이 규칙이 붙으면 안 된다");
 }
 
 // ── 9) 짧은 채널은 채널별 노출 규칙이 따로 붙는다 ──
@@ -117,3 +128,37 @@ for (const t of ["review", "guide", "case", "ad"]) {
 }
 
 console.log("광고형 프롬프트 검증 통과 — 평소글 비오염 · 광고법 가드 · 입력 전달 · 폴백 · 사람문체 · 노출규칙");
+
+// ── 8) 2026-09-06 사장님 지시: 블로그 훅·가독성·기획 메모 / 짧은 채널 기획 메모 / 인스타 길이 ──
+{
+  const DELIM = "===기획메모===";
+  for (const ch of ["naver", "google"]) {
+    const out = buildPrompt({ ...base, channel: ch, postType: "review" });
+    assert.ok(out.includes("[블로그 도입부"), `${ch}: 훅 규칙 없음`);
+    assert.ok(out.includes("이거 내 이야기인데?"), `${ch}: '내 이야기' 훅 문구 없음`);
+    assert.ok(out.includes("[모바일 가독성"), `${ch}: 가독성 규칙 없음`);
+    assert.ok(out.includes("댓글로") && out.includes("CTA"), `${ch}: 댓글·CTA 규칙 없음`);
+    assert.ok(out.includes("썸네일 문구 Top 3"), `${ch}: 썸네일 문구 기획 없음`);
+    assert.ok(out.includes(DELIM), `${ch}: 기획 메모 구분선 없음`);
+  }
+  for (const ch of ["instagram", "threads"]) {
+    const out = buildPrompt({ ...base, channel: ch, postType: "review" });
+    assert.ok(out.includes("메인 키워드: 1개") && out.includes("제목(첫 줄) 후보 5개"), `${ch}: 기획 메모 항목 없음`);
+    assert.ok(out.includes(DELIM), `${ch}: 기획 메모 구분선 없음`);
+    assert.ok(!out.includes("[블로그 도입부"), `${ch}: 블로그 훅 규칙이 섞였다`);
+  }
+  for (const ch of ["youtube", "facebook"]) {
+    const out = buildPrompt({ ...base, channel: ch, postType: "review" });
+    assert.ok(!out.includes(DELIM), `${ch}: 기획 메모가 붙으면 안 된다`);
+  }
+  const ig = buildPrompt({ ...base, channel: "instagram", postType: "review" });
+  assert.ok(ig.includes("250자 이내") && ig.includes("6줄 이내"), "인스타 길이 제한 없음");
+  assert.ok(ig.includes("8~12개"), "인스타 해시태그 상한 없음");
+  const hv = buildPrompt({ ...base, channel: "naver", postType: "review" });
+  for (const must of ["물론입니다", "대시(—)", "분열문", "은유"]) {
+    assert.ok(hv.includes(must), `문체 규칙에 "${must}" 없음 (humanize-korean 이식분)`);
+  }
+  assert.ok(hv.includes("혼자 읽혀도 뜻이 통해야") && hv.includes("정의문") && hv.includes("기준 시점"), "GEO 인용 규칙 없음");
+}
+console.log("prompt.test: 전부 통과");
+

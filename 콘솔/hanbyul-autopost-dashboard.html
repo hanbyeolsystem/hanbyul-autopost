@@ -200,6 +200,22 @@
       </div>
     </div>
 
+    <div class="row">
+      <div>
+        <label>글 스타일 <span style="font-size:11px;color:var(--sub)">(구글 블로그 폰트·색상)</span></label>
+        <select id="styleSel">
+          <option value="random">🎲 매번 다르게 (추천)</option>
+        </select>
+      </div>
+      <div>
+        <label>사람 문체 <span style="font-size:11px;color:var(--sub)">(AI 티 제거 2차 다듬기)</span></label>
+        <label style="display:flex;align-items:center;gap:8px;font-weight:400;cursor:pointer;padding:9px 0">
+          <input type="checkbox" id="humanize" checked style="width:16px;height:16px;margin:0"/>
+          <span>생성 뒤 haiku 로 한 번 더 다듬기 <span style="font-size:11px;color:var(--sub)">(글당 약 $0.01~0.03)</span></span>
+        </label>
+      </div>
+    </div>
+
     <!-- 광고형을 골랐을 때만 열린다. 광고는 '무엇을·누구에게·왜 지금'이 없으면 혼잣말이 된다. -->
     <div id="adBox" style="display:none;border:1px solid var(--line,#d7dfea);border-left:3px solid #c2410c;
          border-radius:8px;padding:12px 14px;margin-top:10px;background:rgba(194,65,12,.04)">
@@ -327,6 +343,7 @@ const CHANNELS = [
 
 let media = [];
 let drafts = {};
+let plans = {};   // 채널별 기획 메모(발행 안 됨 — 키워드·제목 후보·썸네일 문구)
 let imageDescText = '';   // 사진 분석 결과 (생성 시 백엔드로 전달)
 let ytVideoFiles = {};    // 유튜브 카드용 영상 파일 (File 객체)
 
@@ -830,6 +847,7 @@ function readGenInputs(){
     adTarget:    (document.getElementById('adTarget')||{}).value || '',
     adCta:       (document.getElementById('adCta')||{}).value || '',
     apiBase: document.getElementById('apiBase').value.trim(),
+    humanize: document.getElementById('humanize').checked,
     imageDesc: imageDescText,
     imageCount: media.filter(f=>f.type.startsWith('image/')).length,
     videoCount: media.filter(f=>f.type.startsWith('video/')).length,
@@ -841,7 +859,7 @@ async function generateOneChannel(ch, card){
   const p = readGenInputs();
   if(!p.seed.trim()){ alert('한 일 / 핵심 메시지를 입력해 주세요.'); return; }
   setCardLoading(card, p.apiBase);
-  let text, usage=null;
+  let text, usage=null, extra=null;
   if(p.apiBase){
     try{
       const {apiBase, ...payload} = p;
@@ -854,6 +872,7 @@ async function generateOneChannel(ch, card){
       if(data.error) throw new Error(data.error);
       text = data.text || generateFor(ch, p.seed, p.kw, p.tone, p.region, p.model, p.pain, p.postType);
       usage = data.usage || null;
+      extra = { plan: data.plan || '', length: data.length || null, over: !!data.over_limit };
     }catch(e){
       text = generateFor(ch, p.seed, p.kw, p.tone, p.region, p.model, p.pain, p.postType)
            + `\n\n[⚠ AI 백엔드 연결 실패(${e.message}) → 공식으로 자동 생성됨. 백엔드 주소/실행 상태를 확인하세요.]`;
@@ -868,7 +887,8 @@ async function generateOneChannel(ch, card){
     totalCost += usage.usd; saveTotalCost();
     document.getElementById('costTotal').textContent = '$'+totalCost.toFixed(4);
   }
-  fillCard(card, ch, text, usage);
+  if(extra && extra.plan) plans[ch.id] = extra.plan;
+  fillCard(card, ch, text, usage, extra);
   return usage;
 }
 
@@ -980,12 +1000,22 @@ function setCardLoading(card, apiBase){
 }
 
 // 완성 본문 + 버튼(미리보기/복사/예약) 채우기
-function fillCard(card, ch, text, usage){
+// 인스타·쓰레드 본문 한도(해시태그 제외). 서버 CHANNEL_LIMITS 와 같은 값.
+const BODY_LIMIT = { instagram: 250, threads: 450 };
+function bodyLen(text){
+  const ls = text.split('\n').map(l=>l.trim()).filter(l=> l && l!=='.' && !/^(#[^\s#]+\s*)+$/.test(l));
+  return { body: ls.join('').length, lines: ls.length };
+}
+
+function fillCard(card, ch, text, usage, extra){
   const body = card.querySelector('[data-body]');
   const foot = card.querySelector('[data-foot]');
+  const plan = (extra && extra.plan) || plans[ch.id] || '';
   body.innerHTML = `
       <textarea id="ta-${ch.id}">${escapeHtml(text)}</textarea>
-      <div style="font-size:11px;color:var(--sub);margin-top:6px" id="cnt-${ch.id}"></div>`;
+      <div style="font-size:11px;color:var(--sub);margin-top:6px" id="cnt-${ch.id}"></div>
+      ${plan ? `<details style="margin-top:8px;font-size:12px"><summary style="cursor:pointer;color:var(--accent)">📋 기획 메모 (발행 안 됨 — 키워드·제목 후보·썸네일 문구)</summary>
+        <pre style="white-space:pre-wrap;font-family:inherit;background:rgba(0,0,0,.04);border-radius:8px;padding:10px;margin:6px 0 0;line-height:1.6">${escapeHtml(plan)}</pre></details>` : ''}`;
   // 예약: 자동채널은 '예약 발행', 반자동은 '예약 알림'
   const ytAttach = (ch.id === 'youtube')
     ? `<button class="mini" data-act="ytattach">🎞 영상 첨부 <span data-ytinfo style="font-size:11px;color:var(--sub)">${ytVideoFiles[ch.id] ? '(첨부됨: '+escapeHtml(ytVideoFiles[ch.id].name.slice(0,18))+')' : ''}</span></button>`
@@ -1008,8 +1038,16 @@ function fillCard(card, ch, text, usage){
   const ta = body.querySelector('textarea');
   const cnt = body.querySelector('#cnt-'+ch.id);
   const upd = ()=>{ const n=ta.value.length;
-    cnt.textContent = `${n}자 ${n>ch.limit?'⚠ 한도 초과':''}`;
-    cnt.style.color = n>ch.limit?'var(--danger)':'var(--sub)'; };
+    const lim = BODY_LIMIT[ch.id];
+    if(lim){
+      const b = bodyLen(ta.value);
+      const over = b.body>lim;
+      cnt.textContent = `본문 ${b.body}자 / ${lim}자 (해시태그 제외, ${b.lines}줄) · 전체 ${n}자 ${over?'⚠ 너무 길어요 — 줄여 주세요':'✓'}`;
+      cnt.style.color = over?'var(--danger)':'var(--sub)';
+    } else {
+      cnt.textContent = `${n}자 ${n>ch.limit?'⚠ 한도 초과':''}`;
+      cnt.style.color = n>ch.limit?'var(--danger)':'var(--sub)';
+    } };
   ta.oninput = upd; upd();
 
   // 이 채널만 AI 로 다시 생성 (토큰 1콜)
@@ -1267,6 +1305,24 @@ document.getElementById('modal').onclick=e=>{ if(e.target.id==='modal') document
 let totalCost = 0;
 try{ totalCost = parseFloat(localStorage.getItem('hanbyul_totalCost')||'0')||0; }catch(e){}
 function saveTotalCost(){ try{ localStorage.setItem('hanbyul_totalCost', String(totalCost)); }catch(e){} }
+// 글 스타일 목록: 서버 /styles 에서 받아 채운다(실패하면 '매번 다르게'만 남는다). 선택은 기억.
+async function loadStyles(){
+  const sel=document.getElementById('styleSel'); if(!sel) return;
+  const saved=localStorage.getItem('hanbyul_style')||'random';
+  const base=(document.getElementById('apiBase').value||'').trim();
+  if(base){
+    try{
+      const r=await aiFetch(base,'/styles'); const d=await r.json();
+      (d.styles||[]).forEach(st=>{
+        const o=document.createElement('option'); o.value=st.id; o.textContent=st.name;
+        o.style.fontFamily=st.family; o.style.color=st.heading; sel.appendChild(o);
+      });
+    }catch(_e){}
+  }
+  sel.value=[...sel.options].some(o=>o.value===saved)?saved:'random';
+  sel.onchange=()=>localStorage.setItem('hanbyul_style', sel.value);
+}
+document.addEventListener('DOMContentLoaded', loadStyles);
 document.addEventListener('DOMContentLoaded', ()=>{
   document.getElementById('costTotal').textContent = '$'+totalCost.toFixed(4);
   syncAdBox();
@@ -1416,7 +1472,8 @@ function loadRowToCards(p){
     const ch=CH_BY_ID[id]; if(!ch) return;
     const text=(p.channels[id]&&p.channels[id].text)||'';
     drafts[id]=text;
-    const card=makeCardShell(ch); cards.appendChild(card); fillCard(card, ch, text, null);
+    plans[id]=(p.channels[id]&&p.channels[id].plan)||'';
+    const card=makeCardShell(ch); cards.appendChild(card); fillCard(card, ch, text, null, {plan: plans[id]});
   });
   document.getElementById('bulkbar').style.display='flex';
   showView('draft');
@@ -1750,13 +1807,13 @@ async function publishNow(ch, text){
     try {
       const r = await aiFetch(apiBase, '/publish/google', {
         method: 'POST',
-        body: JSON.stringify({ title, content: body, blogId: blogId || undefined, images, videos })
+        body: JSON.stringify({ title, content: body, blogId: blogId || undefined, images, videos, style: { preset: (document.getElementById('styleSel')||{}).value || 'random' } })
       });
       const d = await r.json().catch(()=>({ok:false,error:'응답 파싱 실패'}));
       if (!r.ok || !d.ok) throw new Error(d.error || ('HTTP '+r.status));
       addToBoard(ch.id, makePost(ch, text, '발행', { url: d.url }));
       saveHistory(ch.id, text);
-      alert('✅ 구글 블로그에 발행되었습니다.\n주소: '+d.url);
+      alert('✅ 구글 블로그에 발행되었습니다.\n주소: '+d.url+(d.style?'\n글 스타일: '+d.style:''));
       window.open(d.url, '_blank');
     } catch (e) {
       alert('❌ 구글 블로그 발행 실패\n'+e.message+'\n\n채널 연결 박스에서 OAuth 인증을 했는지, Supabase Secret(GOOGLE_REFRESH_TOKEN, GOOGLE_BLOG_ID)이 등록됐는지 확인하세요.');
