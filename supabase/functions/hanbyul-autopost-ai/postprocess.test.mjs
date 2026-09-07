@@ -23,7 +23,7 @@ execSync(`npx -y esbuild@0.24.0 "${src}" --loader:.ts=ts --format=esm --log-leve
 globalThis.Deno = { env: { get: () => undefined }, serve: () => {} };
 let js = fs.readFileSync(outJs, "utf8");
 js = js.replace(/^import\s+"jsr:[^"]+";\s*$/m, "");   // 타입 전용 import — node 에선 뺀다
-js += "\nexport { splitPlan, postClean, bodyLength, textToBloggerHtml, wrapStyled, pickStyle, STYLE_PRESETS, PLAN_DELIM, CHANNEL_LIMITS, countFaq, insertFaq, FAQ_CHANNELS };\n";
+js += "\nexport { splitPlan, postClean, bodyLength, textToBloggerHtml, wrapStyled, pickStyle, STYLE_PRESETS, PLAN_DELIM, CHANNEL_LIMITS, countFaq, insertFaq, FAQ_CHANNELS, withXmp, buildXmp };\n";
 fs.writeFileSync(outJs, js);
 const m = await import(pathToFileURL(outJs).href);
 
@@ -107,5 +107,30 @@ const m = await import(pathToFileURL(outJs).href);
   assert.ok(extra.includes('alt="한별시스템 현장 사진"'), "마커 없는 여분 사진의 alt 없음");
 }
 
+// 8) 사진 메타데이터(XMP): JPEG 에 APP1 세그먼트가 JFIF 뒤에 들어가고, 길이 필드가 맞고, 본문이 보존된다
+{
+  const jfif = [0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x48, 0x00, 0x48, 0x00, 0x00];
+  const body = [0xFF, 0xDB, 0x00, 0x04, 0x01, 0x02, 0xFF, 0xD9];
+  const src = new Uint8Array([...jfif, ...body]);
+  const meta = { title: "대구 달서구 사무실 NAS 설치", description: "한별시스템 현장 사진 & <DS925+>", keywords: ["대구 NAS", "시놀로지"], city: "대구" };
+  const out = m.withXmp(src, meta);
+  assert.ok(out.length > src.length, "세그먼트가 안 들어갔다");
+  assert.ok(out[0] === 0xFF && out[1] === 0xD8 && out[2] === 0xFF && out[3] === 0xE0, "SOI/JFIF 순서 깨짐");
+  const pos = 4 + ((out[4] << 8) | out[5]);
+  assert.ok(out[pos] === 0xFF && out[pos + 1] === 0xE1, "APP1 이 JFIF 바로 뒤가 아니다");
+  const len = (out[pos + 2] << 8) | out[pos + 3];
+  const xml = new TextDecoder().decode(out.subarray(pos + 4, pos + 2 + len));
+  assert.ok(xml.startsWith("http://ns.adobe.com/xap/1.0/\0"), "XMP 헤더 없음");
+  assert.ok(xml.includes("대구 달서구 사무실 NAS 설치") && xml.includes("&amp; &lt;DS925+&gt;"), "제목/이스케이프 문제");
+  assert.ok(xml.includes("<rdf:li>대구 NAS</rdf:li>") && xml.includes("<photoshop:City>대구</photoshop:City>"), "키워드/도시 없음");
+  assert.ok(xml.includes("한별시스템"), "creator 없음");
+  // 원본 본문은 그대로 뒤에
+  const tail = Array.from(out.subarray(out.length - body.length));
+  assert.deepStrictEqual(tail, body, "본문 바이트 손상");
+  // JPEG 아니면 그대로
+  const png = new Uint8Array([0x89, 0x50, 0x4E, 0x47]);
+  assert.strictEqual(m.withXmp(png, meta), png);
+}
+
 fs.rmSync(outDir, { recursive: true, force: true });
-console.log("postprocess.test: 전부 통과 — 기획메모 분리 · 대시/챗봇 정리 · 길이 계산 · 스타일 HTML · 랜덤 프리셋 · Q&A 3개 삽입 · 사진 alt");
+console.log("postprocess.test: 전부 통과 — 기획메모 분리 · 대시/챗봇 정리 · 길이 계산 · 스타일 HTML · 랜덤 프리셋 · Q&A 3개 삽입 · 사진 alt · XMP 메타데이터");

@@ -1201,7 +1201,50 @@ async function queueDelete(id: number) {
 }
 
 // 첨부 사진(base64) → Storage 업로드 → 공개 URL. 대기열이 사진을 들고 다니게 함.
-async function uploadMedia(images: { data: string; media_type?: string; name?: string }[]) {
+// ── 사진 메타데이터(XMP) — 사람 눈엔 안 보이고 AI·검색은 읽는 통로 ──
+// 화면에 흐리게 찍은 글씨는 AI 도 같은 픽셀을 보므로 사람이 못 보면 AI 도 못 읽는다.
+// 대신 JPEG 안에 XMP(dc:title/description/subject/creator, photoshop:City·Credit)를 넣는다.
+// 구글 이미지·AI 도구가 읽는 표준 필드. Storage 는 바이트를 그대로 보관하므로 유지된다.
+// (인스타는 업로드 때 메타데이터를 지운다 — 인스타는 캡션·해시태그가 통로.)
+interface ImageMeta { title?: string; description?: string; keywords?: string[]; creator?: string; city?: string }
+function xmlEsc(v: string): string {
+  return v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+function buildXmp(m: ImageMeta): string {
+  const alt = (v: string) => `<rdf:Alt><rdf:li xml:lang="x-default">${xmlEsc(v)}</rdf:li></rdf:Alt>`;
+  const kws = (m.keywords || []).map((k) => k.trim()).filter(Boolean);
+  const creator = m.creator || COMPANY.name;
+  return `<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>
+<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+<rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:photoshop="http://ns.adobe.com/photoshop/1.0/" xmlns:xmp="http://ns.adobe.com/xap/1.0/">
+${m.title ? `<dc:title>${alt(m.title)}</dc:title>` : ""}
+${m.description ? `<dc:description>${alt(m.description)}</dc:description>` : ""}
+${kws.length ? `<dc:subject><rdf:Bag>${kws.map((k) => `<rdf:li>${xmlEsc(k)}</rdf:li>`).join("")}</rdf:Bag></dc:subject>` : ""}
+<dc:creator><rdf:Seq><rdf:li>${xmlEsc(creator)}</rdf:li></rdf:Seq></dc:creator>
+<dc:rights>${alt("© " + creator)}</dc:rights>
+<photoshop:Credit>${xmlEsc(creator)}</photoshop:Credit>
+<photoshop:City>${xmlEsc(m.city || "대구")}</photoshop:City>
+<photoshop:Country>대한민국</photoshop:Country>
+<xmp:CreatorTool>${xmlEsc(creator)} 광고자동화</xmp:CreatorTool>
+</rdf:Description></rdf:RDF></x:xmpmeta>
+<?xpacket end="w"?>`;
+}
+// JPEG 바이트에 XMP APP1 세그먼트를 끼운다. JFIF(APP0) 가 있으면 그 뒤, 없으면 SOI 바로 뒤. JPEG 가 아니면 그대로.
+function withXmp(bytes: Uint8Array, meta: ImageMeta): Uint8Array {
+  if (bytes.length < 4 || bytes[0] !== 0xFF || bytes[1] !== 0xD8) return bytes;
+  const payload = new TextEncoder().encode("http://ns.adobe.com/xap/1.0/\0" + buildXmp(meta));
+  if (payload.length + 2 > 65533) return bytes;
+  const len = payload.length + 2;
+  const seg = new Uint8Array(4 + payload.length);
+  seg[0] = 0xFF; seg[1] = 0xE1; seg[2] = (len >> 8) & 0xFF; seg[3] = len & 0xFF; seg.set(payload, 4);
+  let pos = 2;
+  if (bytes[2] === 0xFF && bytes[3] === 0xE0) pos = 4 + ((bytes[4] << 8) | bytes[5]);
+  const out = new Uint8Array(bytes.length + seg.length);
+  out.set(bytes.subarray(0, pos), 0); out.set(seg, pos); out.set(bytes.subarray(pos), pos + seg.length);
+  return out;
+}
+
+async function uploadMedia(images: { data: string; media_type?: string; name?: string; meta?: ImageMeta }[]) {
   if (!SUPABASE_URL || !SERVICE_KEY) throw new Error("Storage 환경변수(SUPABASE_URL/SERVICE_ROLE)가 없습니다.");
   const out: { url: string }[] = [];
   for (const img of images.slice(0, 60)) {   // 사실상 무제한(콘솔이 4장씩 나눠 호출)
@@ -1210,7 +1253,8 @@ async function uploadMedia(images: { data: string; media_type?: string; name?: s
     // 파일명에 키워드(ASCII 만): 검색·AI 가 URL 도 읽는다. 콘솔이 모델명 등으로 만들어 보낸다.
     const slug = (img.name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
     const path = `posts/${slug ? slug + "-" : ""}${crypto.randomUUID().slice(0, 8)}.${ext}`;
-    const bytes = Uint8Array.from(atob(img.data), (c) => c.charCodeAt(0));
+    let bytes = Uint8Array.from(atob(img.data), (c) => c.charCodeAt(0));
+    if (img.meta && ext === "jpg") bytes = withXmp(bytes, img.meta);   // 사람 눈엔 안 보이는 사진 설명
     const r = await fetch(`${SUPABASE_URL}/storage/v1/object/autopost-media/${path}`, {
       method: "POST",
       headers: {
@@ -1816,9 +1860,10 @@ Deno.serve(async (req: Request) => {
     }
 
     if (req.method === "POST" && sub === "/media/upload") {
-      const p = await req.json() as { images?: { data: string; media_type?: string }[] };
+      const p = await req.json() as { images?: { data: string; media_type?: string; name?: string; meta?: ImageMeta }[]; meta?: ImageMeta };
       if (!p.images || !p.images.length) return jsonResponse(400, { ok: false, error: "images 필요" });
-      const images = await uploadMedia(p.images);
+      // 요청 단위 meta 는 개별 meta 가 없는 사진에 적용
+      const images = await uploadMedia(p.images.map((im) => ({ ...im, meta: im.meta || p.meta })));
       return jsonResponse(200, { ok: true, images });
     }
 

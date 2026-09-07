@@ -214,8 +214,8 @@
           <span>생성 뒤 haiku 로 한 번 더 다듬기 <span style="font-size:11px;color:var(--sub)">(글당 약 $0.01~0.03)</span></span>
         </label>
         <label style="display:flex;align-items:center;gap:8px;font-weight:400;cursor:pointer;padding:0 0 6px">
-          <input type="checkbox" id="stampMain" checked style="width:16px;height:16px;margin:0"/>
-          <span>메인 사진에 투명 글씨 <span style="font-size:11px;color:var(--sub)">(제목·한별시스템·지역·모델, AI 검색용. 사람 눈엔 거의 안 보임)</span></span>
+          <input type="checkbox" id="stampMain" style="width:16px;height:16px;margin:0"/>
+          <span>메인 사진에 흐린 글씨도 찍기 <span style="font-size:11px;color:var(--sub)">(기본 꺼짐. 사진 설명은 눈에 안 보이는 메타데이터(XMP)로 모든 사진에 자동으로 들어감)</span></span>
         </label>
       </div>
     </div>
@@ -608,6 +608,16 @@ function stampLines(){
   const l2=['한별시스템', g('region')||'대구', g('service'), g('model')].filter(Boolean).join(' · ');
   const l3=g('kw').split(',').map(x=>x.trim()).filter(Boolean).slice(0,4).join(' ');
   return [title,l2,l3].filter(Boolean);
+}
+// 사진 메타데이터(XMP): 사람 눈엔 안 보이고 AI·검색이 읽는다. 서버가 JPEG 안에 심는다.
+function mediaMeta(){
+  const g=id=>(document.getElementById(id)||{}).value||'';
+  const lines=stampLines();
+  const title=lines[0]||'';
+  const kws=[...new Set([g('region')||'대구', g('service'), g('model'), ...g('kw').split(',').map(x=>x.trim()), '한별시스템', 'NAS', '대구 사무기기']
+    .filter(Boolean))].slice(0,15);
+  const description=[title, '한별시스템('+(g('region')||'대구')+') 현장 사진', g('model')?('장비: '+g('model')):'', g('service')?('서비스: '+g('service')):'', g('pain')?('고객 상황: '+g('pain').slice(0,80)):''].filter(Boolean).join('. ');
+  return { title, description, keywords: kws, creator:'한별시스템', city: g('region')||'대구' };
 }
 // 파일명 슬러그(ASCII 만): 모델명 + hanbyeol. URL 에도 키워드가 들어가게.
 function mediaSlug(){
@@ -1420,10 +1430,11 @@ async function uploadCurrentMedia(apiBase){
   const files = media.filter(f=>f.type.startsWith('image/'));   // 개수 제한 없음 — 전부 사용
   if(!files.length) return [];
   const out=[]; const B=4;   // 요청 크기 한계 회피: 4장씩 나눠 업로드
-  const stamp = (document.getElementById('stampMain')||{checked:true}).checked ? stampLines() : null;
+  const stamp = (document.getElementById('stampMain')||{checked:false}).checked ? stampLines() : null;
+  const meta = mediaMeta();
   for(let i=0;i<files.length;i+=B){
     const b64 = await Promise.all(files.slice(i,i+B).map((f,k)=>fileToResizedB64(f, undefined, undefined, (i+k===0)?stamp:null)));
-    const r = await aiFetch(apiBase,'/media/upload',{method:'POST',body:JSON.stringify({images:b64})});
+    const r = await aiFetch(apiBase,'/media/upload',{method:'POST',body:JSON.stringify({images:b64, meta})});
     const d = await r.json(); if(!r.ok||!d.ok) throw new Error(d.error||'사진 업로드 실패');
     out.push(...(d.images||[]));
   }
