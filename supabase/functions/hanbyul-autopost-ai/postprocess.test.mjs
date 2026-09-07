@@ -23,7 +23,7 @@ execSync(`npx -y esbuild@0.24.0 "${src}" --loader:.ts=ts --format=esm --log-leve
 globalThis.Deno = { env: { get: () => undefined }, serve: () => {} };
 let js = fs.readFileSync(outJs, "utf8");
 js = js.replace(/^import\s+"jsr:[^"]+";\s*$/m, "");   // 타입 전용 import — node 에선 뺀다
-js += "\nexport { splitPlan, postClean, bodyLength, textToBloggerHtml, wrapStyled, pickStyle, STYLE_PRESETS, PLAN_DELIM, CHANNEL_LIMITS };\n";
+js += "\nexport { splitPlan, postClean, bodyLength, textToBloggerHtml, wrapStyled, pickStyle, STYLE_PRESETS, PLAN_DELIM, CHANNEL_LIMITS, countFaq, insertFaq, FAQ_CHANNELS };\n";
 fs.writeFileSync(outJs, js);
 const m = await import(pathToFileURL(outJs).href);
 
@@ -80,5 +80,32 @@ const m = await import(pathToFileURL(outJs).href);
   assert.ok(m.STYLE_PRESETS.length >= 6, "프리셋이 너무 적다");
 }
 
+// 6) Q&A 3개 보장: 개수 세기 + 연락처 줄 앞에 끼우기
+{
+  assert.strictEqual(m.countFaq("Q. 하나\nA. 답\n**Q. 둘**\nA. 답\nQ: 셋\nA: 답"), 3);
+  assert.strictEqual(m.countFaq("질문 없음"), 0);
+  const body = "본문 문단.\n\n댓글로 남겨 주세요.\n\n한별시스템 053-588-7119\n\n#대구NAS #한별시스템";
+  const out = m.insertFaq(body, "Q. 비용은요?\nA. 부가세 포함 안내드립니다.\nQ. 며칠 걸리나요?\nA. 하루면 됩니다.\nQ. 고장 나면요?\nA. 원격으로 먼저 봅니다.");
+  const iFaq = out.indexOf("## 자주 묻는 질문"), iTel = out.indexOf("053-588-7119"), iTag = out.indexOf("#대구NAS");
+  assert.ok(iFaq > 0 && iFaq < iTel && iTel < iTag, "Q&A 가 연락처 줄 앞에 들어가야 한다");
+  assert.strictEqual(m.countFaq(out), 3);
+  const out2 = m.insertFaq("본문.\n\n#태그 #둘", "Q. 하나\nA. 답");
+  assert.ok(out2.indexOf("## 자주 묻는 질문") < out2.indexOf("#태그"), "전화 줄 없으면 해시태그 앞");
+  assert.ok(m.FAQ_CHANNELS.has("naver") && m.FAQ_CHANNELS.has("facebook") && !m.FAQ_CHANNELS.has("instagram"));
+  const nv = m.insertFaq("본문.\n\n한별시스템 053-588-7119", "Q. 하나\nA. 답", "naver");
+  assert.ok(nv.includes("\n자주 묻는 질문\n") && !nv.includes("## "), "네이버 평문에 ## 가 들어가면 안 된다");
+}
+
+// 7) 사진 alt/title/figcaption — AI·검색이 사진을 찾는 건 이 글자다
+{
+  const st = m.pickStyle("gothic-blue");
+  const html = m.textToBloggerHtml("앞\n\n[📷 사진 1 - 설치 완료된 DS925+ 모습]\n\n뒤", [{ url: "https://x/y.jpg" }], [], st);
+  assert.ok(html.includes('alt="설치 완료된 DS925+ 모습"'), "alt 없음: " + html);
+  assert.ok(html.includes('title="설치 완료된 DS925+ 모습"'), "title 없음");
+  assert.ok(html.includes("<figure") && html.includes("<figcaption"), "figure/figcaption 없음");
+  const extra = m.textToBloggerHtml("본문만", [{ url: "https://x/a.jpg" }], [], st);
+  assert.ok(extra.includes('alt="한별시스템 현장 사진"'), "마커 없는 여분 사진의 alt 없음");
+}
+
 fs.rmSync(outDir, { recursive: true, force: true });
-console.log("postprocess.test: 전부 통과 — 기획메모 분리 · 대시/챗봇 정리 · 길이 계산 · 스타일 HTML · 랜덤 프리셋");
+console.log("postprocess.test: 전부 통과 — 기획메모 분리 · 대시/챗봇 정리 · 길이 계산 · 스타일 HTML · 랜덤 프리셋 · Q&A 3개 삽입 · 사진 alt");

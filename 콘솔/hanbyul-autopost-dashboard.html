@@ -213,6 +213,10 @@
           <input type="checkbox" id="humanize" checked style="width:16px;height:16px;margin:0"/>
           <span>생성 뒤 haiku 로 한 번 더 다듬기 <span style="font-size:11px;color:var(--sub)">(글당 약 $0.01~0.03)</span></span>
         </label>
+        <label style="display:flex;align-items:center;gap:8px;font-weight:400;cursor:pointer;padding:0 0 6px">
+          <input type="checkbox" id="stampMain" checked style="width:16px;height:16px;margin:0"/>
+          <span>메인 사진에 투명 글씨 <span style="font-size:11px;color:var(--sub)">(제목·한별시스템·지역·모델, AI 검색용. 사람 눈엔 거의 안 보임)</span></span>
+        </label>
       </div>
     </div>
 
@@ -591,7 +595,47 @@ function fileToB64(file){
 }
 
 // 이미지 파일 → 리사이즈된 JPEG base64. Blogger 인라인 삽입용(원본은 너무 큼).
-function fileToResizedB64(file, maxW, quality){
+// 메인 사진에 넣을 투명 글씨 줄들. AI(비전·OCR)는 읽고 사람 눈엔 거의 안 보이는 농도.
+// 제목은 생성된 글의 첫 줄(블로그 우선), 없으면 '한 일' 첫 줄. 나머지는 입력값에서.
+function stampLines(){
+  const g=id=>(document.getElementById(id)||{}).value||'';
+  let title='';
+  for(const id of ['google','naver','facebook','threads','instagram']){
+    if(drafts[id]){ title=splitTitleAndBody(drafts[id]).title; if(title) break; }
+  }
+  if(!title) title=g('seed').split('\n')[0];
+  title=title.replace(/\|.*$/,'').trim().slice(0,48);
+  const l2=['한별시스템', g('region')||'대구', g('service'), g('model')].filter(Boolean).join(' · ');
+  const l3=g('kw').split(',').map(x=>x.trim()).filter(Boolean).slice(0,4).join(' ');
+  return [title,l2,l3].filter(Boolean);
+}
+// 파일명 슬러그(ASCII 만): 모델명 + hanbyeol. URL 에도 키워드가 들어가게.
+function mediaSlug(){
+  const g=id=>(document.getElementById(id)||{}).value||'';
+  const m=(g('model')+' '+g('service')).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'');
+  return (m?m+'-':'')+'hanbyeol-daegu';
+}
+function drawStamp(ctx, w, h, lines){
+  if(!lines||!lines.length) return;
+  const fs=Math.max(13, Math.round(w/34));
+  ctx.save();
+  ctx.font=`600 ${fs}px 'Malgun Gothic','Apple SD Gothic Neo',sans-serif`;
+  ctx.textBaseline='bottom';
+  const pad=Math.round(fs*0.9), lh=Math.round(fs*1.35), maxW=w-pad*2;
+  // 너비를 넘는 줄은 뒤를 잘라 '…' (제목이 길면 오른쪽이 잘려 나가던 문제)
+  const fit=t=>{ let u=t; while(u.length>4 && ctx.measureText(u+'…').width>maxW) u=u.slice(0,-1); return u===t?t:u+'…'; };
+  let y=h-pad;
+  for(let i=lines.length-1;i>=0;i--){
+    const t=fit(lines[i]);
+    // 어두운 배경·밝은 배경 어디서나 OCR 이 잡히도록 흰 글씨 + 검은 그림자 두 겹. 농도는 사람 눈에 거의 안 걸리는 선.
+    ctx.fillStyle='rgba(0,0,0,0.09)'; ctx.fillText(t, pad+1, y+1);
+    ctx.fillStyle='rgba(255,255,255,0.15)'; ctx.fillText(t, pad, y);
+    y-=lh;
+  }
+  ctx.restore();
+}
+
+function fileToResizedB64(file, maxW, quality, stamp){
   maxW = maxW || 1200;
   quality = quality || 0.85;
   return new Promise((res, rej)=>{
@@ -605,12 +649,14 @@ function fileToResizedB64(file, maxW, quality){
         const h = Math.round(img.naturalHeight * ratio);
         const cv = document.createElement('canvas');
         cv.width = w; cv.height = h;
-        cv.getContext('2d').drawImage(img, 0, 0, w, h);
+        const ctx = cv.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        if(stamp) drawStamp(ctx, w, h, stamp);
         URL.revokeObjectURL(url);
         const dataUrl = cv.toDataURL('image/jpeg', quality);
         const m = /^data:([^;]+);base64,(.+)$/.exec(dataUrl);
         if(!m) return rej(new Error('base64 추출 실패'));
-        res({ media_type: m[1], data: m[2] });
+        res({ media_type: m[1], data: m[2], name: mediaSlug() });
       }catch(e){ URL.revokeObjectURL(url); rej(e); }
     };
     img.onerror = ()=>{ URL.revokeObjectURL(url); rej(new Error('이미지 로드 실패')); };
@@ -872,7 +918,7 @@ async function generateOneChannel(ch, card){
       if(data.error) throw new Error(data.error);
       text = data.text || generateFor(ch, p.seed, p.kw, p.tone, p.region, p.model, p.pain, p.postType);
       usage = data.usage || null;
-      extra = { plan: data.plan || '', length: data.length || null, over: !!data.over_limit };
+      extra = { plan: data.plan || '', length: data.length || null, over: !!data.over_limit, faq: data.faq };
     }catch(e){
       text = generateFor(ch, p.seed, p.kw, p.tone, p.region, p.model, p.pain, p.postType)
            + `\n\n[⚠ AI 백엔드 연결 실패(${e.message}) → 공식으로 자동 생성됨. 백엔드 주소/실행 상태를 확인하세요.]`;
@@ -1045,8 +1091,10 @@ function fillCard(card, ch, text, usage, extra){
       cnt.textContent = `본문 ${b.body}자 / ${lim}자 (해시태그 제외, ${b.lines}줄) · 전체 ${n}자 ${over?'⚠ 너무 길어요 — 줄여 주세요':'✓'}`;
       cnt.style.color = over?'var(--danger)':'var(--sub)';
     } else {
-      cnt.textContent = `${n}자 ${n>ch.limit?'⚠ 한도 초과':''}`;
-      cnt.style.color = n>ch.limit?'var(--danger)':'var(--sub)';
+      const q=(ta.value.match(/^\s*(\*\*)?Q[.:]/gm)||[]).length;
+      const faqNote = ['naver','google','facebook'].includes(ch.id) ? ` · Q&A ${q}개${q<3?' ⚠ 3개 필요':' ✓'}` : '';
+      cnt.textContent = `${n}자 ${n>ch.limit?'⚠ 한도 초과':''}${faqNote}`;
+      cnt.style.color = (n>ch.limit || (faqNote && q<3))?'var(--danger)':'var(--sub)';
     } };
   ta.oninput = upd; upd();
 
@@ -1372,8 +1420,9 @@ async function uploadCurrentMedia(apiBase){
   const files = media.filter(f=>f.type.startsWith('image/'));   // 개수 제한 없음 — 전부 사용
   if(!files.length) return [];
   const out=[]; const B=4;   // 요청 크기 한계 회피: 4장씩 나눠 업로드
+  const stamp = (document.getElementById('stampMain')||{checked:true}).checked ? stampLines() : null;
   for(let i=0;i<files.length;i+=B){
-    const b64 = await Promise.all(files.slice(i,i+B).map(f=>fileToResizedB64(f)));
+    const b64 = await Promise.all(files.slice(i,i+B).map((f,k)=>fileToResizedB64(f, undefined, undefined, (i+k===0)?stamp:null)));
     const r = await aiFetch(apiBase,'/media/upload',{method:'POST',body:JSON.stringify({images:b64})});
     const d = await r.json(); if(!r.ok||!d.ok) throw new Error(d.error||'사진 업로드 실패');
     out.push(...(d.images||[]));

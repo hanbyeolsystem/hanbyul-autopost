@@ -114,7 +114,8 @@ const SEO_GUIDE = `
    - 기준 시점을 한 번 밝혀라. "2026년 9월 기준" 처럼. AI 검색은 최신 글을 고른다.
 6) "한별시스템" 과 "대구" 가 사실 문장 안에 같이 한 번은 나와야 한다. 회사소개가 아니라 사실 문장으로.
    예) "한별시스템이 대구 달서구 사무실에 설치한 DS925+는 ~".
-7) 글 끝에 자주 묻는 질문 2~3개를 "Q. 질문 / A. 답" 형태로 붙여라(짧은 채널은 제외). 답은 두 문장 이내.
+7) ★ 글 아래쪽에 "자주 묻는 질문" 을 정확히 3개, "Q. 질문" 줄 다음 "A. 답" 줄 형태로 붙여라(CTA 문단 앞). 답은 두 문장 이내.
+   고객이 실제로 궁금해하는 것으로 골라라: 비용(부가세 포함 여부)·걸리는 기간·기존 장비와 호환·고장 나면 어떻게·꼭 우리 업체에 맡겨야 하는지 같은 것. 뻔한 홍보성 질문 금지.
 8) 짧은 채널(인스타·쓰레드·페이스북)은 위 4)~6) 대신, 혼자 읽혀도 뜻이 통하는 사실 문장을 하나 넣어라.
 9) 읽는 사람이 자기를 대입할 자리를 만들어라.
    같은 검색어로 우리보다 위에 있는 글들의 공통점이다(2026-09 실측).
@@ -180,7 +181,7 @@ const PLAN_GUIDE = `
 - 세부 키워드: 함께 쓸 것 5~10개 (쉼표 구분)
 - 제목(첫 줄) 후보 5개: 검색 의도를 반영해 각각 다른 각도로. 번호 붙여 한 줄씩
 - 본문 구조: 어떤 순서로 무엇을 말했는지 3~5줄
-- 꼭 다룰 내용: 독자가 실제로 궁금해하는 질문 2~3개와 그 답의 요지
+- 고객 Q&A 3개: 독자가 실제로 궁금해할 질문(비용·기간·호환·사후 지원)과 한 줄 답. 발행 뒤 첫 댓글로 달 용도
 - 소개 문구: 검색 결과·피드에서 클릭하고 싶게 만드는 한 줄 (40자 이내)
 - 추천 태그: 해시태그 후보 (본문에 쓴 것 + 대안)
 키워드를 억지로 반복하지 마라. 독자가 실제로 궁금해하는 질문에 답하는 글이 되게 하라.
@@ -249,6 +250,7 @@ const CHANNEL_AGENTS: Record<string, string> = {
 
   facebook: `[채널] 페이스북 — 지역 사업주(중장년) 신뢰 스토리, 약간 긴 글 허용.
 - 고객 어려움/현장 스토리로 따뜻하게 시작 → 함께 찾은 해결 → "파는 곳이 아니라 돌봐드리는 곳, 동네 IT 담당자" 철학 한 단락 → 부담 없는 문의 유도.
+- 글 아래쪽에 고객이 궁금해할 Q&A 3개("Q. 질문" 줄 다음 "A. 한 문장 답" 줄). 비용·기간·호환·사후 지원 같은 실제 궁금증.
 - ☎${COMPANY.tel} + 해시태그 3~7개. 진중·따뜻한 톤.`,
 };
 
@@ -562,7 +564,58 @@ ${text}
   }
 }
 
-// 생성 결과 마무리: 기획 메모 분리 → 규칙 정리 → (옵션) 2차 다듬기 → 한도 초과면 압축. usage 는 합산.
+// ── Q&A 3개 보장 (블로그·페이스북) ──
+const FAQ_CHANNELS = new Set(["naver", "google", "facebook"]);
+function countFaq(text: string): number {
+  return (text.match(/^\s*(\*\*)?Q[.:]/gm) || []).length;
+}
+// Q&A 블록을 연락처 줄(전화번호) 앞에 끼운다. 전화 줄이 없으면 해시태그 블록 앞, 그것도 없으면 맨 끝.
+function insertFaq(text: string, faq: string, channel = "google"): string {
+  const lines = text.split("\n");
+  let at = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (lines[i].includes(COMPANY.tel)) { at = i; break; }
+  }
+  if (at < 0) {
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const t = lines[i].trim();
+      if (!t || /^(#[^\s#]+\s*)+$/.test(t) || /^Keywords?\s*:/i.test(t)) continue;
+      at = i + 1; break;
+    }
+  }
+  if (at < 0) at = lines.length;
+  // 구글만 ## 소제목(HTML 로 바뀜). 네이버·페북은 복사해 붙이는 평문이라 기호 없이.
+  const block = ["", channel === "google" ? "## 자주 묻는 질문" : "자주 묻는 질문", "", faq.trim(), ""];
+  return [...lines.slice(0, at), ...block, ...lines.slice(at)].join("\n").replace(/\n{3,}/g, "\n\n");
+}
+async function ensureFaq(text: string, channel: string): Promise<{ text: string; usage: { usd: number; input_tokens: number; output_tokens: number } } | null> {
+  if (!FAQ_CHANNELS.has(channel)) return null;
+  const have = countFaq(text);
+  if (have >= 3) return null;
+  const need = 3 - have;
+  const prompt = `아래 글을 읽고, 이 글을 본 고객이 실제로 궁금해할 질문 ${need}개와 답을 만들어라. 글에 이미 있는 Q&A 와 겹치지 않게.
+- 후보: 비용(부가세 포함 여부)·걸리는 기간·기존 장비와 호환·고장 나면 어떻게 되나·꼭 이 업체에 맡겨야 하나·용량/대수 기준. 홍보성 질문 금지.
+- 형식은 정확히 이렇게, 다른 말 없이:
+Q. 질문
+A. 답(두 문장 이내)
+- 글에 없는 사실·숫자를 지어내지 마라. 모르면 "현장 확인 뒤 정확히 안내" 로.
+- 사람 말투. 쉼표 최소. "결론적으로/정리하면" 금지. 대시(—) 금지.
+회사: ${COMPANY.name}(대구, ${COMPANY.tel})
+
+<글>
+${text.slice(0, 6000)}
+</글>`;
+  try {
+    const r = await callClaude(prompt, "claude-haiku-4-5");
+    const faq = r.text.trim().replace(/[—–]/g, "-");
+    if (countFaq(faq) < need) return { text, usage: r.usage };   // 형식이 어긋나면 넣지 않는다
+    return { text: insertFaq(text, faq, channel), usage: r.usage };
+  } catch (_e) {
+    return null;
+  }
+}
+
+// 생성 결과 마무리: 기획 메모 분리 → 규칙 정리 → (옵션) 2차 다듬기 → Q&A 3개 보장 → 한도 초과면 압축. usage 는 합산.
 async function finishText(raw: string, channel: string, humanize = true) {
   const { text: t0, plan: plan0 } = splitPlan(raw);
   let text = postClean(t0);
@@ -573,6 +626,8 @@ async function finishText(raw: string, channel: string, humanize = true) {
     const h = await humanizePass(text, channel);
     if (h) { text = postClean(h.text); add(h.usage); }
   }
+  const f = await ensureFaq(text, channel);
+  if (f) { text = f.text; add(f.usage); }
   const lim = CHANNEL_LIMITS[channel];
   if (lim && bodyLength(text).body > lim.body) {
     const c = await condensePass(text, channel);
@@ -580,7 +635,7 @@ async function finishText(raw: string, channel: string, humanize = true) {
   }
   const len = bodyLength(text);
   const over = lim ? len.body > lim.body : false;
-  return { text, plan, extra: { usd: +extra.usd.toFixed(5), input_tokens: extra.input_tokens, output_tokens: extra.output_tokens }, len, over };
+  return { text, plan, extra: { usd: +extra.usd.toFixed(5), input_tokens: extra.input_tokens, output_tokens: extra.output_tokens }, len, over, faq: countFaq(text) };
 }
 
 type Usage = { model: string; input_tokens: number; output_tokens: number; usd: number };
@@ -692,7 +747,7 @@ function textToBloggerHtml(
   });
   if (imgIdx < images.length) {
     replaced += images.slice(imgIdx).map((im) =>
-      `\n\n<!--IMG-->${srcOf(im)}||현장 사진<!--/IMG-->\n`
+      `\n\n<!--IMG-->${srcOf(im)}||${COMPANY.name} 현장 사진<!--/IMG-->\n`
     ).join("");
   }
   // ── 영상: [🎬 영상 N] 마커 자리에 순서대로, 남으면 끝에 전부 추가 ──
@@ -719,7 +774,9 @@ function textToBloggerHtml(
       const sep = inner.indexOf("||");
       const src = sep >= 0 ? inner.slice(0, sep) : inner;
       const caption = sep >= 0 ? inner.slice(sep + 2) : "";
-      return `<div style="margin:14px 0;text-align:center"><img src="${src}" style="max-width:100%;height:auto;border-radius:8px"/>${caption ? `<div style="font-size:12px;color:#888;margin-top:6px">${escHtml(caption)}</div>` : ""}</div>`;
+      // alt/title = 캡션(사진 마커의 설명). AI·검색이 사진을 찾는 건 픽셀이 아니라 이 글자다.
+      const alt = escHtml((caption || "현장 사진").replace(/^📷\s*사진\s*\d+\s*[-—–:]?\s*/, "").trim() || "현장 사진");
+      return `<figure style="margin:14px 0;text-align:center"><img src="${src}" alt="${alt}" title="${alt}" loading="lazy" style="max-width:100%;height:auto;border-radius:8px"/>${caption ? `<figcaption style="font-size:12px;color:#888;margin-top:6px">${escHtml(caption)}</figcaption>` : ""}</figure>`;
     }
     if (trimmed.startsWith("<!--VID-->")) {
       const inner = trimmed.replace(/<!--\/?VID-->/g, "").trim();
@@ -1144,13 +1201,15 @@ async function queueDelete(id: number) {
 }
 
 // 첨부 사진(base64) → Storage 업로드 → 공개 URL. 대기열이 사진을 들고 다니게 함.
-async function uploadMedia(images: { data: string; media_type?: string }[]) {
+async function uploadMedia(images: { data: string; media_type?: string; name?: string }[]) {
   if (!SUPABASE_URL || !SERVICE_KEY) throw new Error("Storage 환경변수(SUPABASE_URL/SERVICE_ROLE)가 없습니다.");
   const out: { url: string }[] = [];
   for (const img of images.slice(0, 60)) {   // 사실상 무제한(콘솔이 4장씩 나눠 호출)
     const mt = img.media_type || "image/jpeg";
     const ext = mt.includes("png") ? "png" : mt.includes("webp") ? "webp" : "jpg";
-    const path = `posts/${crypto.randomUUID()}.${ext}`;
+    // 파일명에 키워드(ASCII 만): 검색·AI 가 URL 도 읽는다. 콘솔이 모델명 등으로 만들어 보낸다.
+    const slug = (img.name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+    const path = `posts/${slug ? slug + "-" : ""}${crypto.randomUUID().slice(0, 8)}.${ext}`;
     const bytes = Uint8Array.from(atob(img.data), (c) => c.charCodeAt(0));
     const r = await fetch(`${SUPABASE_URL}/storage/v1/object/autopost-media/${path}`, {
       method: "POST",
@@ -1608,7 +1667,7 @@ Deno.serve(async (req: Request) => {
       const p = await req.json() as GenInput & { humanize?: boolean };
       const result = await callClaude(buildPrompt(p), modelForChannel(p.channel));
       const fin = await finishText(result.text, p.channel, p.humanize !== false);
-      return jsonResponse(200, { ok: true, channel: p.channel, text: fin.text, plan: fin.plan, usage: mergeUsage(result.usage, fin.extra), length: fin.len, over_limit: fin.over });
+      return jsonResponse(200, { ok: true, channel: p.channel, text: fin.text, plan: fin.plan, usage: mergeUsage(result.usage, fin.extra), length: fin.len, over_limit: fin.over, faq: fin.faq });
     }
 
     if (req.method === "POST" && sub === "/analyze-image") {

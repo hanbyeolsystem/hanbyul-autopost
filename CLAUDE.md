@@ -26,6 +26,8 @@ index.html                                    # GitHub Pages entry → redirects
 **Backend** (`supabase/functions/hanbyul-autopost-ai/index.ts`) — one Deno Edge Function, `Deno.serve` with manual path routing. The router strips `/functions/v1/<slug>` and switches on the remaining sub-path:
 - `GET  /health` — capability flags (which keys/integrations are configured)
 - `POST /generate` — Claude text generation (채널별 모델: 블로그=`claude-sonnet-5`, 짧은 채널=`claude-haiku-4-5`; `CHANNEL_MODEL` 맵). 응답 `{text, plan, usage, length, over_limit}`. 생성 뒤 `finishText()`: 기획 메모(`===기획메모===`) 분리 → `postClean`(대시→하이픈, 챗봇 머리·꼬리) → `humanizePass`(haiku, im-not-ai 룰북, `humanize:false` 로 끔) → 인스타·쓰레드 한도 초과면 `condensePass`. 배치 수집(`/queue/collect`)도 같은 후처리.
+- **Q&A 3개 무조건(2026-09-08 사장님 지시)**: 네이버·구글·페북은 본문 아래쪽에 정확히 3개(프롬프트) + 서버 `ensureFaq()` 가 3개 미만이면 haiku 로 보충해 연락처 줄 앞에 삽입(구글만 `##` 소제목). 인스타·쓰레드는 기획 메모의 "고객 Q&A 3개"(첫 댓글용). 응답 `faq` = 개수.
+- **메인 사진 투명 글씨(2026-09-08)**: 콘솔 `uploadCurrentMedia` 가 첫 사진에만 `drawStamp`(제목·한별시스템·지역·모델·키워드, 흰 15%+검은 9%, 너비 초과는 …)를 캔버스로 굽는다. 체크박스 `stampMain`. 서버는 `<img alt title>`+`<figure><figcaption>`, 파일명 슬러그(모델명-hanbyeol-daegu). AI·검색이 사진을 찾는 건 alt·캡션·파일명·화면 속 글자다.
 - `GET  /styles` — 구글 블로그 글 스타일 프리셋(폰트·색상) 목록. `/publish/google` 의 `style:{preset}`('random' 이면 글마다 다르게)으로 `textToBloggerHtml` 이 ##/###/>/-/**/==/Q.A. 마커를 색·폰트 입힌 HTML 로 바꾼다. 블로거는 `<style>@import` 를 살려 둔다(2026-09-06 실측).
 - `POST /queue/generate-batch` — 요청 채널을 Batch API로 한 번에 제출(요금 −50%), 대기열에 `generating` 적재(배치 ID는 `channels._pending_batch`에 임시 보관)
 - `POST /queue/collect` — 끝난 배치 결과 조립 → `pending` 승격. 콘솔이 대기열 열 때마다 호출(폴링). 단가는 `modelForChannel(ch)` 별칭 기준(응답 model은 날짜 붙은 풀 ID)
