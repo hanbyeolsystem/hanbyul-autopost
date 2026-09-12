@@ -63,3 +63,7 @@ There is no local emulator config checked in; verify against the deployed functi
 - All user-facing strings and comments are Korean; keep that voice. The brand tone is strict: posts must read as *helping* ("같이 찾아드릴게요"), never *selling* ("사세요"); no superlatives or competitor bashing; text must match the attached photos (never invent equipment/models not visible).
 - `구글블로그.txt` and `secrets/`, `*.key`, `.env` are git-ignored — never commit credentials.
 - Commit messages are Korean Conventional Commits (`feat(blog):`, `fix(google-oauth):`).
+
+## 사람글 규칙 (2026-09-12)
+- 6채널 전부 `클로드코드공부/글쓰기규칙/사람글_규칙.md` 를 따른다. 코드 반영 위치: `HUMAN_VOICE` 12)~15), `HUMANIZE_RULES` 끝 두 줄, `CHANNEL_AGENTS.google` 제목 규칙(대시·"함께 해결한 이야기" 꼬리 금지).
+- 생성 결과를 점검하려면 글을 .md 로 저장하고 `python ../글쓰기규칙/ai_tell_check.py <파일>` 로 밀도를 본다(8 이하 합격).
