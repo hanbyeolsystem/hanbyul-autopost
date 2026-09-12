@@ -23,7 +23,7 @@ execSync(`npx -y esbuild@0.24.0 "${src}" --loader:.ts=ts --format=esm --log-leve
 globalThis.Deno = { env: { get: () => undefined }, serve: () => {} };
 let js = fs.readFileSync(outJs, "utf8");
 js = js.replace(/^import\s+"jsr:[^"]+";\s*$/m, "");   // 타입 전용 import — node 에선 뺀다
-js += "\nexport { splitPlan, postClean, bodyLength, textToBloggerHtml, wrapStyled, pickStyle, STYLE_PRESETS, PLAN_DELIM, CHANNEL_LIMITS, countFaq, insertFaq, FAQ_CHANNELS, withXmp, buildXmp };\n";
+js += "\nexport { splitPlan, postClean, bodyLength, textToBloggerHtml, wrapStyled, pickStyle, STYLE_PRESETS, PLAN_DELIM, CHANNEL_LIMITS, countFaq, insertFaq, FAQ_CHANNELS, withXmp, buildXmp, ruleViolations };\n";
 fs.writeFileSync(outJs, js);
 const m = await import(pathToFileURL(outJs).href);
 
@@ -134,3 +134,14 @@ const m = await import(pathToFileURL(outJs).href);
 
 fs.rmSync(outDir, { recursive: true, force: true });
 console.log("postprocess.test: 전부 통과 — 기획메모 분리 · 대시/챗봇 정리 · 길이 계산 · 스타일 HTML · 랜덤 프리셋 · Q&A 3개 삽입 · 사진 alt · XMP 메타데이터");
+
+// 사람글 규칙 게이트(2026-09-12): 입니다 3연속·60자·금지어·이모지 감지
+{
+  const v = m.ruleViolations("견적서가 어디 있는지 몰랐습니다. 직원이 여섯입니다. 자료가 흩어져 있습니다. 혁신적인 솔루션입니다.", "google");
+  assert.ok(v.some((x) => x.startsWith("입니다 3연속")), "입니다 3연속 감지 실패: " + v.join(" | "));
+  assert.ok(v.some((x) => x.includes("혁신")) && v.some((x) => x.includes("솔루션")), "금지어 감지 실패");
+  assert.ok(m.ruleViolations("★ 강조", "google").some((x) => x.startsWith("이모지")), "기호 감지 실패");
+  assert.ok(m.ruleViolations("짧게 씁니다. 그래서 됩니다요. 끝.", "google").length === 0, "정상 글에 오탐");
+  assert.ok(m.ruleViolations("좋아요 😊 한 개", "instagram").length === 0, "인스타 이모지 1개는 허용");
+  console.log("ruleViolations 통과");
+}

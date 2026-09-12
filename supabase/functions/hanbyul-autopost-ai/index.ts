@@ -623,7 +623,57 @@ ${text.slice(0, 6000)}
   }
 }
 
-// 생성 결과 마무리: 기획 메모 분리 → 규칙 정리 → (옵션) 2차 다듬기 → Q&A 3개 보장 → 한도 초과면 압축. usage 는 합산.
+// ── 사람글 규칙 게이트(2026-09-12 사장님 지시) ─────────────────────
+// 윤문 뒤에도 남는 위반(입니다 3연속·60자 초과 문장·금지어·이모지)을 기계적으로 세고,
+// 있으면 그 문장만 겨냥해 haiku 1콜로 다시 고친다. 위반이 없으면 호출하지 않는다.
+const BANNED_WORDS = ["혁신", "최첨단", "차별화", "극대화", "선도", "최적", "완벽", "놀라운", "최고", "맞춤형", "솔루션", "신뢰할 수 있는",
+  "지속적인", "경쟁력", "스마트한", "전문성", "다양한", "강력한", "간편하게", "안심", "걱정 없이", "시너지", "노하우", "파트너", "든든",
+  "책임집니다", "자랑", "결론적으로", "정리하면", "요약하자면", "알아보겠습니다"];
+function ruleViolations(text: string, channel = "google"): string[] {
+  const out: string[] = [];
+  const short = channel === "instagram" || channel === "threads" || channel === "facebook";
+  for (const raw of text.split("\n")) {
+    const ln = raw.trim();
+    if (!ln || /^(#|\[📷|\[🎬|\||Keywords:|===|-{3,})/.test(ln) || /^(#[^\s#]+\s*)+$/.test(ln)) continue;
+    const sents = ln.split(/(?<=[.!?다요죠])\s+/).map((s) => s.trim()).filter((s) => /[가-힣]/.test(s));
+    for (let i = 0; i + 2 < sents.length; i++) {
+      if ([0, 1, 2].every((k) => /(입니다|습니다)[.!?]?$/.test(sents[i + k]))) { out.push(`입니다 3연속: "${sents[i + 1].slice(0, 40)}"`); i += 2; }
+    }
+    for (const s of sents) if (s.length > 60) out.push(`60자 초과: "${s.slice(0, 40)}…"`);
+  }
+  for (const w of BANNED_WORDS) if (text.includes(w)) out.push(`금지어: ${w}`);
+  if (!short) {
+    const emo = text.replace(/\[📷[^\]]*\]|\[🎬[^\]]*\]/g, "").match(/[\u2600-\u27BF\u2B50\u{1F300}-\u{1FAFF}]/gu);
+    if (emo) out.push(`이모지·기호: ${[...new Set(emo)].join(" ")}`);
+  }
+  return out;
+}
+
+async function targetedPass(text: string, channel: string): Promise<{ text: string; usage: { usd: number; input_tokens: number; output_tokens: number } } | null> {
+  const v = ruleViolations(text, channel);
+  if (!v.length || text.length < 40) return null;
+  const prompt = `아래 글에서 다음 위반만 고쳐라. 나머지 문장·사실·숫자·모델명·전화번호·마커·서식·줄바꿈은 한 글자도 바꾸지 마라.
+${v.slice(0, 40).map((x) => "- " + x).join("\n")}
+[고치는 법] "입니다 3연속" → 가운데 문장의 끝만 ~요 / 명사형("~까지.") / 질문으로. "60자 초과" → 뜻 그대로 두 문장으로 자른다. "금지어" → 지우거나 그 문장에 이미 있는 구체어로(새 사실 금지). "이모지·기호" → 지운다.
+고친 글 전체만 출력한다. 설명·머리말 금지.
+
+<원문>
+${text}
+</원문>`;
+  try {
+    const r = await callClaude(prompt, "claude-haiku-4-5");
+    let out = r.text.trim().replace(/^<[^>]+>\s*/, "").replace(/\s*<\/[^>]+>$/, "");
+    const cnt = (t: string, re: RegExp) => (t.match(re) || []).length;
+    const lostMarker = cnt(out, /\[📷/g) !== cnt(text, /\[📷/g) || cnt(out, /\[🎬/g) !== cnt(text, /\[🎬/g);
+    const lostTel = text.includes(COMPANY.tel) && !out.includes(COMPANY.tel);
+    if (!out || lostMarker || lostTel || out.length < text.length * 0.7) return { text, usage: r.usage };
+    return { text: out, usage: r.usage };
+  } catch (_e) {
+    return null;
+  }
+}
+
+// 생성 결과 마무리: 기획 메모 분리 → 규칙 정리 → (옵션) 2차 다듬기 → 규칙 게이트 → Q&A 3개 보장 → 한도 초과면 압축. usage 는 합산.
 async function finishText(raw: string, channel: string, humanize = true) {
   const { text: t0, plan: plan0 } = splitPlan(raw);
   let text = postClean(t0);
@@ -633,6 +683,8 @@ async function finishText(raw: string, channel: string, humanize = true) {
   if (humanize) {
     const h = await humanizePass(text, channel);
     if (h) { text = postClean(h.text); add(h.usage); }
+    const tp = await targetedPass(text, channel);   // 사람글 규칙 위반만 겨냥해 한 번 더(위반 없으면 호출 안 함)
+    if (tp) { text = postClean(tp.text); add(tp.usage); }
   }
   const f = await ensureFaq(text, channel);
   if (f) { text = f.text; add(f.usage); }
