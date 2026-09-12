@@ -67,3 +67,4 @@ There is no local emulator config checked in; verify against the deployed functi
 ## 사람글 규칙 (2026-09-12)
 - 6채널 전부 `클로드코드공부/글쓰기규칙/사람글_규칙.md` 를 따른다. 코드 반영 위치: `HUMAN_VOICE` 12)~15), `HUMANIZE_RULES` 끝 두 줄, `CHANNEL_AGENTS.google` 제목 규칙(대시·"함께 해결한 이야기" 꼬리 금지).
 - 생성 결과를 점검하려면 글을 .md 로 저장하고 `python ../글쓰기규칙/ai_tell_check.py <파일>` 로 밀도를 본다(8 이하 합격).
+- 생성 뒤 `targetedPass()` 가 `ruleViolations()`(입니다 3연속·60자 초과·금지어·이모지)로 위반을 세어 있을 때만 haiku 1콜로 그 문장만 다시 고친다. 실측(2026-09-12 구글 후기형): 밀도 10.6 → 1.2, 입니다 3연속 9 → 1. 게이트를 끄려면 humanize:false.
