@@ -1621,6 +1621,8 @@ async function classifyComment(text: string): Promise<{ sentiment: string; reply
   if (!ANTHROPIC_KEY) throw new Error("ANTHROPIC_API_KEY 시크릿이 필요합니다.");
   const prompt = `당신은 ${COMPANY.name} SNS 댓글 담당자입니다. 아래 댓글에 대한 답글을 작성합니다.
 [톤] 파는 곳이 아니라 돕는 곳. 과장 없이 따뜻하고 담백하게. 이모지는 0~1개만.
+[사람이 쓴 말로] 한 문장 30자 안팎. "입니다" 로 끝나는 문장을 세 개 연달아 쓰지 마라. 정해진 문구를 그대로 붙여넣은 듯 쓰지 말고 그 댓글에만 맞는 말을 한다.
+  쓰지 않는 말: 최고·최상·완벽·소중한 의견·저희 파트너·항상 최선을 다·많은 관심 부탁·행복한 하루 되세요. 대신 구체적으로 답한다.
 [분류]
 - thanks: 감사·칭찬·응원 댓글 → 짧고 진심 어린 감사 인사(1~2문장)
 - question: 가격·설치·방문 등 문의성 댓글 → 감사 인사 + 간단 답변 + "편하게 전화(${COMPANY.tel}) 주세요" 유도(2~3문장)
