@@ -64,11 +64,11 @@ def ready_fonts():
 # (코덱스 2026-09-19 지적: 무작위로 붙이면 자료 분산 후킹이 RAID 고장 사례에 붙어 말이 안 맞는다)
 HOOKS = {
     "nas": [
-        ("loss", "외장하드 하나만 믿고 계신가요", "외장하드도 고장 납니다", "사본을 두 벌 두면 한 벌이 고장 나도 자료가 남습니다", ["외장", "백업", "복구", "USB", "하드"]),
+        ("loss", "외장하드 하나만 믿고 계신가요", "외장하드도 고장 납니다", "그래서 사본을 두 벌 두고 한 벌은 따로 보관합니다", ["외장", "백업", "복구", "USB", "하드"]),
         ("myth", "클라우드면 안전하다고들 합니다", "회사 자료는 얘기가 다릅니다", "용량이 늘수록 매달 나가는 돈도 같이 늘어납니다", ["클라우드", "구독", "드라이브", "이관"]),
-        ("number", "NAS 한 대로 정리했습니다", "설치·설정·교육까지 하루", "자료를 한 곳에 모으고 사본을 따로 둡니다", []),
+        ("number", "자료 한 곳에 모으셨나요", "흩어져 있으면 찾기부터 오래 걸립니다", "한 곳에 모아 두면 찾기도 관리도 수월해집니다", []),
         ("target", "자료가 직원 PC마다 흩어져 있다면", "이 영상이 그 얘기입니다", "한 곳에 모으면 누가 어떤 파일을 가졌는지 찾기 쉬워집니다", ["흩어", "분산", "공유", "폴더", "권한"]),
-        ("loss", "하드디스크는 언젠가 고장 납니다", "그때 자료가 남느냐가 갈립니다", "RAID 설정과 백업 체계를 같이 봐야 자료가 남습니다", ["RAID", "레이드", "고장", "장애", "복구", "디스크"]),
+        ("loss", "하드디스크는 언젠가 고장 납니다", "RAID 는 백업이 아닙니다", "RAID 를 걸어 놔도 사본은 따로 둬야 합니다", ["RAID", "레이드", "고장", "장애", "복구", "디스크"]),
         ("save", "대구에서 NAS 맡길 곳 찾는다면", "저장해 두세요", "구축 실적 100건 이상, 대구·경북은 당일 출장이 가능합니다", []),
     ],
     "printer": [
@@ -88,7 +88,7 @@ HOOKS = {
     "network": [
         ("loss", "공유기 하나로 버티고 계신가요", "사무실이 커지면 먼저 막힙니다", "선과 장비는 처음에 잡아야 나중에 헤매지 않습니다", ["공유기", "속도", "끊", "느리", "와이파이"]),
         ("myth", "인터넷 느리면 통신사 탓 같죠", "사무실 안이 문제일 때가 많습니다", "배선과 장비 구성부터 봐야 원인이 나옵니다", ["느리", "끊", "속도", "장애"]),
-        ("number", "랜공사 하루면 끝납니다", "배선·공유기·공유폴더까지", "이사나 입주 전에 하면 선정리가 깔끔합니다", ["배선", "랜", "공사", "시공"]),
+        ("number", "랜선은 벽 뜯기 전에 잡아야 합니다", "배선·공유기·공유폴더 한 번에", "이사나 입주 전에 하면 선정리가 깔끔해집니다", ["배선", "랜", "공사", "시공"]),
         ("target", "사무실 옮기실 예정이라면", "인테리어 끝나기 전에 보세요", "전원과 랜선 자리를 같이 잡아야 합니다", ["이전", "이사", "입주", "신축", "확장"]),
         ("save", "대구 사무실 네트워크 공사 찾는다면", "저장해 두세요", "대구·경북 중심으로 50개사 이상 시공했습니다", []),
     ],
@@ -123,14 +123,32 @@ def cases():
     return json.loads(r.stdout.strip().splitlines()[-1])
 
 
-def first_sentence(s, limit=60):
-    """첫 문장만. 너무 길면 자른다. 자막은 짧아야 읽힌다."""
+# 광고에 쓰면 곤란한 말. 사례 원문에 있어도 쇼츠 자막·캡션에서는 그 문장을 피한다.
+# (코덱스 2026-09-19 지적: "플래그십 라인"은 최상위 제품군으로 오인할 소지가 있다)
+AVOID = ("플래그십", "최고", "최상", "최적", "업계 1위", "1위", "무조건", "100%", "완벽", "절대")
+
+
+def split_sentences(s):
     s = " ".join(s.split())
-    for end in ("다. ", "요. ", "죠. ", "다.", "요.", "죠."):
-        i = s.find(end)
-        if 10 < i < limit + 25:
-            return s[: i + 1].strip()
-    return textwrap.shorten(s, width=limit, placeholder="…")
+    out, cur = [], ""
+    for ch in s:
+        cur += ch
+        if ch in ".!?" and len(cur.strip()) > 8:
+            out.append(cur.strip())
+            cur = ""
+    if cur.strip():
+        out.append(cur.strip())
+    return out
+
+
+def first_sentence(s, limit=60):
+    """쓸 만한 첫 문장. 최상급·단정 표현이 든 문장은 건너뛴다. 자막은 짧아야 읽힌다."""
+    sents = split_sentences(s)
+    clean = [x for x in sents if not any(w in x for w in AVOID)]
+    for x in (clean or sents):
+        if len(x) <= limit + 25:
+            return x
+    return textwrap.shorten((clean or sents)[0], width=limit, placeholder="…")
 
 
 def wrap(s, per_line):
@@ -147,6 +165,12 @@ def textfile(name: str, s: str) -> Path:
     p = FONT_DIR / f"txt-{name}.txt"
     p.write_text(s, "utf-8")
     return p
+
+
+def clean_items(items):
+    """최상급·단정 표현이 든 항목은 아예 후보에서 뺀다(문장 하나뿐이면 건너뛸 데가 없어서)."""
+    out = [x for x in items if not any(w in x for w in AVOID)]
+    return out or items
 
 
 def pick_hook(case):
@@ -226,7 +250,7 @@ def build(case, quiet=True):
         (pick(1), "그래서 필요합니다", wrap(why, 15), 4.6),
         (pick(1), f"{case['region']} {case['industry']}", wrap(first_sentence(case["challenge"], 52), 15), 5.8),
     ]
-    for i, step in enumerate(case["solution"][:2]):
+    for i, step in enumerate(clean_items(case["solution"])[:2]):
         scenes.append((pick(i + 2), f"한 일 {i + 1}", wrap(first_sentence(step, 48), 15), 5.4))
     scenes.append((pick(len(imgs) - 1), "그래서", wrap(first_sentence(case["result"], 52), 15), 5.6))
 
@@ -267,7 +291,7 @@ def meta(case):
         f"{h['line1']} {h['line2']}\n{h['why']}\n\n"
         f"{case['region']} {case['industry']} 현장입니다.\n"
         f"{first_sentence(case['challenge'], 90)}\n"
-        + "".join(f"- {first_sentence(s, 70)}\n" for s in case["solution"][:3])
+        + "".join(f"- {first_sentence(s, 70)}\n" for s in clean_items(case["solution"])[:3])
         + f"\n{first_sentence(case['result'], 90)}\n\n"
         f"투입 장비: {', '.join(case['gear'][:4])}\n"
         f"자세한 기록: {url}\n"
@@ -276,7 +300,7 @@ def meta(case):
     tags = list(dict.fromkeys(case["tags"] + [case["region"], "한별시스템", "대구"]))[:12]
     hash_ = " ".join("#" + t.replace(" ", "") for t in tags[:10])
     # 인스타는 250자 안팎(해시태그 제외). 첫 줄이 후킹이라 미리보기에서 잘려도 손이 멈춘다.
-    did = " / ".join(first_sentence(s, 34) for s in case["solution"][:2])
+    did = " / ".join(first_sentence(s, 34) for s in clean_items(case["solution"])[:2])
     insta = (
         f"{h['line1']}\n{h['line2']}\n\n"
         f"{h['why']}\n\n"
@@ -286,6 +310,8 @@ def meta(case):
         f"{first_sentence(case['result'], 44)}\n\n"
         f"문의 {PHONE} · 프로필 링크에 현장 기록 전부\n\n{hash_}"
     )
+    if len(insta) > 295:
+        insta = insta[:292].rstrip() + "…"
     threads = (
         f"{h['line1']} {h['line2']}\n\n{h['why']}\n\n"
         f"{case['region']} {case['industry']} 현장 기록입니다.\n"
