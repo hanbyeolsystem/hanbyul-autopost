@@ -1,0 +1,60 @@
+<!-- ===============================================================
+한별시스템 구글블로그(hanbyeolsystem.blogspot.com) 카드 썸네일 패치 v2 (2026-08-28)
+- 증상: 첫 화면/라벨 목록 카드에 사진 대신 파란 자리표시자
+- 원인: 블로거는 구글 서버에 올린 사진만 대표이미지로 인식.
+        자동발행 글(네이버/Supabase/원문 사진)은 대표이미지가 안 생김.
+- v1 문제: 최신 50개 피드만 조회 → IT소식 글이 매일 쌓이자 설치후기 글이
+        50개 밖으로 밀려 사진을 못 찾음.
+- v2 동작: 라벨 페이지면 그 라벨 피드(150개), 아니면 최신 피드(150개)로 채우고,
+        그래도 못 찾은 카드는 글 하나씩(path=) 조회해서 반드시 채움.
+- 설치: blogger.com → 테마 → HTML 편집 → 기존 v1 <script> 블록을 통째로 이것으로 교체
+================================================================ -->
+<script>//<![CDATA[
+(function () {
+  var phs = [].slice.call(document.querySelectorAll('a.post-thumb .post-thumb-ph'));
+  if (!phs.length || !window.fetch) return;
+  function firstImg(html) {
+    var m = /<img[^>]+src=["']([^"']+)/i.exec(html || '');
+    return m ? m[1] : '';
+  }
+  function key(u) { return (u || '').replace(/^https?:\/\/[^\/]+/, '').split(/[?#]/)[0]; }
+  function fill(ph, src) {
+    var a = ph.closest('a.post-thumb');
+    if (!a || !src || a.querySelector('img')) return;
+    var img = document.createElement('img');
+    img.src = src; img.alt = ''; img.loading = 'lazy';
+    img.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;';
+    img.onerror = function () { img.remove(); ph.style.display = ''; };
+    a.appendChild(img);
+    ph.style.display = 'none';
+  }
+  var lm = /\/search\/label\/([^\/?#]+)/.exec(location.pathname);
+  var feed = lm ? '/feeds/posts/default/-/' + lm[1] + '?alt=json&max-results=150'
+                : '/feeds/posts/default?alt=json&max-results=150';
+  fetch(feed).then(function (r) { return r.json(); }).then(function (d) {
+    var map = {};
+    (d.feed.entry || []).forEach(function (e) {
+      var href = '';
+      (e.link || []).forEach(function (l) { if (l.rel === 'alternate') href = l.href; });
+      var src = firstImg(e.content && e.content.$t);
+      if (href && src) map[key(href)] = src;
+    });
+    return map;
+  }).catch(function () { return {}; }).then(function (map) {
+    var rest = [];
+    phs.forEach(function (ph) {
+      var a = ph.closest('a.post-thumb');
+      var src = a && map[key(a.href)];
+      if (src) fill(ph, src); else if (a) rest.push([ph, key(a.href)]);
+    });
+    rest.forEach(function (p) {
+      fetch('/feeds/posts/default?alt=json&path=' + encodeURIComponent(p[1]))
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          var e = d.feed.entry && d.feed.entry[0];
+          fill(p[0], firstImg(e && e.content && e.content.$t));
+        }).catch(function () {});
+    });
+  });
+})();
+//]]></script>

@@ -1,0 +1,52 @@
+# 만들어 둔 세로 영상을 화·금 오전 9시(한국)에 한 편씩 유튜브·인스타·쓰레드에 올린다.
+# 사장님 지시(2026-09-19): 주 2회 자동 발행, 올리기 전 코덱스 검증.
+# 검증은 사람 PC 에서 미리 돌려 둔다(python Youtube/검증.py). 통과 기록(검증.json)이 없는 편은
+# 발행.py 가 스스로 멈춘다. 그래서 이 워크플로가 검증 없이 올리는 일은 생기지 않는다.
+name: 쇼츠 자동 발행
+
+on:
+  schedule:
+    - cron: "0 0 * * 2,5" # UTC 00:00 = 한국 09:00, 화요일·금요일
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "보기만 하고 올리지 않음"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: shorts-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 남은 편수 확인
+        run: python Youtube/발행.py --list
+
+      - name: 다음 차례 한 편 발행
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        run: python Youtube/발행.py --next
+
+      - name: (보기만) 다음 차례 확인
+        if: ${{ github.event.inputs.dry_run == 'true' }}
+        run: python Youtube/발행.py --next --dry-run
+
+      - name: 발행 기록 되돌려 넣기
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        run: |
+          git config user.name "hanbyeol-autopost"
+          git config user.email "noreply@hanbyeolsystem.kr"
+          git add Youtube/발행기록.json
+          git diff --staged --quiet || git commit -m "쇼츠 발행 기록 $(date -u +%Y-%m-%d)"
+          git push
