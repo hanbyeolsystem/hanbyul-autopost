@@ -263,6 +263,19 @@
       <button class="mini" id="netCheck" style="flex:1">🔌 연결 확인</button>
       <button class="mini" id="netReset" style="flex:1">↺ 주소 초기화</button>
     </div>
+
+    <label style="margin-top:14px;display:flex;align-items:center;gap:7px;cursor:pointer">
+      <input type="checkbox" id="useSub" style="width:auto;margin:0" />
+      <span>내 구독 클로드로 글쓰기 (이 PC의 한별AI팀 프로그램 사용)</span>
+    </label>
+    <div class="note" id="subNote">켜면 본문 작성을 사장님 ChatGPT·Claude 구독으로 합니다. API 요금이 들지 않습니다.
+      한별AI팀 프로그램(<b>start.bat</b>)이 켜져 있어야 하고, 이 PC에서만 됩니다. 폰에서는 자동으로 기존 방식으로 넘어갑니다.</div>
+    <div style="display:flex;gap:6px;margin-top:8px">
+      <button class="mini" id="subCheck" style="flex:1">🧠 구독 연결 확인</button>
+    </div>
+    <div id="subDiag" style="display:none;font-size:12px;background:var(--panel2);border:1px solid var(--line);
+      border-radius:8px;padding:9px 11px;margin-top:8px;white-space:pre-wrap;word-break:break-all;
+      font-family:var(--mono)"></div>
     <div id="netDiag" style="display:none;font-size:12px;background:var(--panel2);border:1px solid var(--line);
       border-radius:8px;padding:9px 11px;margin-top:8px;white-space:pre-wrap;word-break:break-all;
       font-family:var(--mono)"></div>
@@ -414,12 +427,87 @@ function persistApiBase(){
 apiBaseEl.addEventListener('change', persistApiBase);
 apiBaseEl.addEventListener('blur', persistApiBase);
 
+// 구독 클로드 스위치: 선택을 기억하고, 눌러서 이 PC 연결을 확인할 수 있게 한다.
+const useSubEl = document.getElementById('useSub');
+if(useSubEl){
+  try{ useSubEl.checked = localStorage.getItem('hanbyul_useSub') === '1'; }catch(e){}
+  useSubEl.addEventListener('change', ()=>{
+    try{ localStorage.setItem('hanbyul_useSub', useSubEl.checked ? '1' : '0'); }catch(e){}
+    if(useSubEl.checked) checkSubBridge();
+  });
+}
+document.getElementById('subCheck')?.addEventListener('click', checkSubBridge);
+
+async function checkSubBridge(){
+  setSubDiag('', '이 PC의 한별AI팀 프로그램을 확인하는 중…');
+  try{
+    const out = await subBridge('한 단어만 답한다.', '연결 확인. "확인"이라고만 답하세요.', 60000);
+    setSubDiag('ok', `연결됨 · ${out.label || 'Claude 구독'} (${out.seconds}초)
+이제 AI 생성이 구독으로 돌아갑니다. API 요금이 들지 않습니다.`);
+  }catch(e){
+    setSubDiag('warn', `연결되지 않았습니다.
+${e.message}
+
+확인할 것
+1) 이 PC에서 한별AI팀 start.bat 을 실행했는지
+2) 휴대폰·다른 PC가 아닌 사장님 PC에서 열었는지
+3) 주소창이 https://hanbyeolsystem.github.io 인지`);
+  }
+}
+
 // ── Supabase Edge Function 호출 헬퍼 ──
 // 백엔드 URL이 *.supabase.co 면 Authorization Bearer / apikey 헤더를 자동 부착.
 // (anon 키는 공개 키 — RLS와 verify_jwt 가 실제 게이트.)
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpyemVzamd5cnZndndhemZhamVjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc3MjgwMTksImV4cCI6MjA5MzMwNDAxOX0.6FAb0CUMuYVqsvWmUR8Bbvmph4MJjlQqSDi_Mkza1c0';
 // 모바일(LTE·약한 와이파이)에선 요청이 응답 없이 매달리는 일이 잦다 → 타임아웃을 둔다.
 const AI_TIMEOUT_MS = 180000;   // AI 생성이 오래 걸리므로 넉넉히 3분
+// ── 구독 클로드 다리 ───────────────────────────────────────────
+// 사장님 PC의 한별AI팀 서버(127.0.0.1:8765)가 구독 CLI 로 글을 쓴다.
+// 프롬프트는 Edge Function 이 만들고(열쇠 불필요), 본문 생성만 구독으로 돌린다.
+const SUB_BRIDGE = 'http://127.0.0.1:8765/api/bridge/generate';
+const subOn = () => !!(document.getElementById('useSub')||{}).checked;
+
+function setSubDiag(kind, msg){
+  const el = document.getElementById('subDiag');
+  if(!el) return;
+  el.style.display = 'block';
+  el.style.color = kind === 'ok' ? 'var(--ok, #16a34a)' : kind === 'warn' ? '#b45309' : '';
+  el.textContent = msg;
+}
+
+async function subBridge(system, input, ms = 600000){
+  const ac = new AbortController();
+  const timer = setTimeout(()=>ac.abort(), ms);
+  try{
+    const r = await fetch(SUB_BRIDGE, {
+      method:'POST',
+      headers:{'Content-Type':'application/json','X-Hanbyeol':'local'},
+      body: JSON.stringify({provider:'claude', system, input}),
+      signal: ac.signal
+    });
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok || !d.text) throw new Error(d.error || ('HTTP ' + r.status));
+    return d;
+  }catch(e){
+    if(e.name === 'AbortError') throw new Error('구독 응답 시간 초과');
+    throw new Error(e.message || '한별AI팀 프로그램에 연결하지 못했습니다.');
+  }finally{ clearTimeout(timer); }
+}
+
+// 구독 경로 한 번: 프롬프트 받기 → 구독으로 본문 쓰기 → 규칙 보정
+async function generateWithSubscription(apiBase, payload, channel){
+  const pr = await aiFetch(apiBase, '/prompt', {method:'POST', body: JSON.stringify({channel, ...payload})});
+  if(!pr.ok) throw new Error('프롬프트 준비 실패 HTTP ' + pr.status);
+  const pd = await pr.json();
+  if(pd.error) throw new Error(pd.error);
+  const out = await subBridge('요청한 글만 작성한다. 설명·머리말·꼬리말을 덧붙이지 않는다.', pd.prompt);
+  const fr = await aiFetch(apiBase, '/finish', {method:'POST', body: JSON.stringify({text: out.text, channel, humanize:false})});
+  if(!fr.ok) throw new Error('보정 실패 HTTP ' + fr.status);
+  const fd = await fr.json();
+  if(fd.error) throw new Error(fd.error);
+  return {...fd, usage: {...(fd.usage||{}), via: '구독 ' + (out.label || 'Claude'), seconds: out.seconds}};
+}
+
 async function aiFetch(base, path, init){
   const url = (base||'').replace(/\/$/,'') + path;
   const headers = Object.assign({'Content-Type':'application/json'}, (init && init.headers) || {});
@@ -919,16 +1007,32 @@ async function generateOneChannel(ch, card){
   if(p.apiBase){
     try{
       const {apiBase, ...payload} = p;
-      const r = await aiFetch(apiBase, '/generate', {
-        method:'POST',
-        body: JSON.stringify({channel:ch.id, ...payload, history: getHistory(ch.id)})
-      });
-      if(!r.ok) throw new Error('HTTP '+r.status);
-      const data = await r.json();
-      if(data.error) throw new Error(data.error);
-      text = data.text || generateFor(ch, p.seed, p.kw, p.tone, p.region, p.model, p.pain, p.postType);
-      usage = data.usage || null;
-      extra = { plan: data.plan || '', length: data.length || null, over: !!data.over_limit, faq: data.faq };
+      const body = {channel:ch.id, ...payload, history: getHistory(ch.id)};
+      let bySub = false;
+      if(subOn()){
+        try{
+          const sub = await generateWithSubscription(apiBase, {...payload, history: getHistory(ch.id)}, ch.id);
+          text = sub.text; usage = sub.usage || null;
+          extra = { plan: sub.plan || '', length: sub.length || null, over: !!sub.over_limit, faq: sub.faq };
+          bySub = true;
+          setSubDiag('ok', `${ch.id} 채널을 구독으로 작성했습니다 (${(usage && usage.seconds) || '?'}초). API 요금 0원.`);
+        }catch(subErr){
+          // 구독이 안 되면 멈추지 않고 기존 백엔드로 넘어간다. 폰에서는 항상 이 길로 온다.
+          setSubDiag('warn', '구독 경로를 쓰지 못해 기존 백엔드로 진행합니다. ' + subErr.message);
+        }
+      }
+      if(!bySub){
+        const r = await aiFetch(apiBase, '/generate', {
+          method:'POST',
+          body: JSON.stringify(body)
+        });
+        if(!r.ok) throw new Error('HTTP '+r.status);
+        const data = await r.json();
+        if(data.error) throw new Error(data.error);
+        text = data.text || generateFor(ch, p.seed, p.kw, p.tone, p.region, p.model, p.pain, p.postType);
+        usage = data.usage || null;
+        extra = { plan: data.plan || '', length: data.length || null, over: !!data.over_limit, faq: data.faq };
+      }
     }catch(e){
       text = generateFor(ch, p.seed, p.kw, p.tone, p.region, p.model, p.pain, p.postType)
            + `\n\n[⚠ AI 백엔드 연결 실패(${e.message}) → 공식으로 자동 생성됨. 백엔드 주소/실행 상태를 확인하세요.]`;

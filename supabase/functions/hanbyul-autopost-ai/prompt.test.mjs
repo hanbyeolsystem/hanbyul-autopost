@@ -10,7 +10,8 @@ import assert from "node:assert";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const src = fs.readFileSync(path.join(here, "index.ts"), "utf8");
+// CRLF 로 저장된 체크아웃에서도 잘라내기 표식을 찾도록 줄바꿈을 먼저 맞춘다.
+const src = fs.readFileSync(path.join(here, "index.ts"), "utf8").replace(/\r\n/g, "\n");
 
 // buildPrompt 와 그 의존 상수만 떼어내 돌린다 (TS 타입 표기는 지운다)
 const cut = (startMark, endMark) => {

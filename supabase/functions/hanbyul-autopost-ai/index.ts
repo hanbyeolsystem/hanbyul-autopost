@@ -1769,6 +1769,20 @@ Deno.serve(async (req: Request) => {
       return jsonResponse(200, { ok: true, styles: STYLE_PRESETS.map((x) => ({ id: x.id, name: x.name, family: x.family, heading: x.heading, accent: x.accent, hl: x.hl })) });
     }
 
+    // 구독 클로드 경로: 열쇠 없이 프롬프트만 돌려준다. 실제 생성은 사장님 PC의 구독 CLI 가 한다.
+    if (req.method === "POST" && sub === "/prompt") {
+      const p = await req.json() as GenInput;
+      return jsonResponse(200, { ok: true, channel: p.channel, prompt: buildPrompt(p), model: modelForChannel(p.channel) });
+    }
+
+    // 구독 경로가 받아 온 본문을 규칙·보정 단계에만 태운다. humanize=false 면 추가 모델 호출 없이 규칙만 적용.
+    if (req.method === "POST" && sub === "/finish") {
+      const p = await req.json() as { text?: string; channel?: string; humanize?: boolean };
+      if (!p.text || !p.channel) return jsonResponse(400, { ok: false, error: "text, channel 필요" });
+      const fin = await finishText(p.text, p.channel, p.humanize === true);
+      return jsonResponse(200, { ok: true, channel: p.channel, text: fin.text, plan: fin.plan, usage: fin.extra, length: fin.len, over_limit: fin.over, faq: fin.faq });
+    }
+
     if (req.method === "POST" && sub === "/generate") {
       const p = await req.json() as GenInput & { humanize?: boolean };
       const result = await callClaude(buildPrompt(p), modelForChannel(p.channel));
