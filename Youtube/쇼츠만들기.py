@@ -20,6 +20,7 @@
 """
 import argparse, json, random, subprocess, sys, textwrap, shutil, os
 from pathlib import Path
+from 내목소리 import narrate
 
 ROOT = Path(__file__).resolve().parent
 SITE = ROOT.parent.parent / "고객용사이트" / "customer"
@@ -231,7 +232,7 @@ def scene_filter(idx: int, title: str, body: str, is_end=False, accent="0xE8B94A
     )
 
 
-def build(case, quiet=True):
+def build(case, quiet=True, voice_style='기본', use_voice=True):
     """한 번의 ffmpeg 호출로 만든다. 조각 mp4 를 만들어 이어 붙이면 파일이 잘려 나왔다."""
     OUT.mkdir(exist_ok=True)
 
@@ -255,14 +256,23 @@ def build(case, quiet=True):
     scenes.append((pick(len(imgs) - 1), "그래서", wrap(first_sentence(case["result"], 52), 15), 5.6))
 
     END = 4.0
+    narration = None
+    if use_voice:
+        scripts = [f'{line1}. {line2}.']
+        scripts += [body.replace('\n', ' ') for _, _, body, _ in scenes]
+        scripts += ['한별시스템. 자세한 내용은 한별시스템 사이트에서 확인해주세요.']
+        narration, durations = narrate(scripts, [HOOK_SEC] + [s[3] for s in scenes] + [END], TMP / case['slug'], voice_style, FPS)
+        HOOK_SEC, END = durations[0], durations[-1]
+        scenes = [(img, title, body, durations[i+1]) for i, (img, title, body, _) in enumerate(scenes)]
+        case['_voice'] = {'provider': 'local-myvoice', 'style': voice_style, 'scripts': scripts, 'scene_durations': durations}
     total = HOOK_SEC + sum(s[3] for s in scenes) + END
 
     # 0번 입력 = 후킹 장면(첫 사진, 스냅 줌)
-    args = ["-loop", "1", "-t", f"{HOOK_SEC}", "-i", str(pick(0))]
+    args = ["-loop", "1", "-framerate", str(FPS), "-t", f"{HOOK_SEC}", "-i", str(pick(0))]
     filters = [hook_filter(0, wrap(line1, 11), wrap(line2, 15), HOOK_SEC)]
     labels = ["[v0]"]
     for i, (img, title, body, dur) in enumerate(scenes, start=1):
-        args += ["-loop", "1", "-t", f"{dur}", "-i", str(img)]
+        args += ["-loop", "1", "-framerate", str(FPS), "-t", f"{dur}", "-i", str(img)]
         filters.append(scene_filter(i, title, body))
         labels.append(f"[v{i}]")
     e = len(scenes) + 1   # 후킹 장면이 0번이라 끝 장면은 장면 수 + 1
@@ -270,14 +280,17 @@ def build(case, quiet=True):
     filters.append(scene_filter(e, "한별시스템", f"{PHONE}\n{SITE_TEXT}\n대구·경북 당일 출장", is_end=True))
     labels.append(f"[v{e}]")
     # 인스타 릴스는 소리 트랙이 없으면 거부될 때가 있어 무음 트랙을 넣는다. 음악은 저작권 때문에 안 넣는다.
-    args += ["-f", "lavfi", "-t", f"{total}", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100"]
+    if narration:
+        args += ['-i', str(narration)]
+    else:
+        args += ["-f", "lavfi", "-t", f"{total}", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100"]
 
     graph = ";".join(filters) + ";" + "".join(labels) + f"concat=n={len(labels)}:v=1:a=0[v]"
     out = OUT / f"{case['slug']}.mp4"
     ff(*args, "-filter_complex", graph, "-map", "[v]", "-map", f"{e + 1}:a",
        "-r", str(FPS), "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
        "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "96k",
-       "-movflags", "+faststart", str(out), quiet=quiet)
+       "-t", str(total), "-movflags", "+faststart", str(out), quiet=quiet)
     return out
 
 
@@ -319,17 +332,25 @@ def meta(case):
     )[:450]
     return {"slug": case["slug"], "hook_type": h["type"], "hook_line": f"{h['line1']} {h['line2']}",
             "youtube_title": title[:100], "youtube_desc": desc, "tags": tags,
-            "instagram_caption": insta, "threads_text": threads, "case_url": url}
+            "instagram_caption": insta, "threads_text": threads, "case_url": url,
+            "narration": case.get('_voice')}
 
 
 def main():
+    global OUT
     ready_fonts()
     ap = argparse.ArgumentParser()
     ap.add_argument("--slug")
     ap.add_argument("--all", action="store_true")
     ap.add_argument("--limit", type=int, default=99)
     ap.add_argument("--list", action="store_true")
+    ap.add_argument('--voice-style', choices=['기본', '활기차게', '차분하게'], default='기본', help='저장된 내 목소리 분위기')
+    ap.add_argument('--no-voice', action='store_true', help='기존처럼 무음 영상 제작')
+    ap.add_argument('--output-dir', type=Path, help='별도 미리보기 출력 폴더')
     a = ap.parse_args()
+    if a.output_dir:
+        OUT = a.output_dir.resolve()
+        OUT.mkdir(parents=True, exist_ok=True)
 
     cs = cases()
     if a.list:
@@ -342,7 +363,7 @@ def main():
 
     made = []
     for c in targets:
-        p = build(c)
+        p = build(c, voice_style=a.voice_style, use_voice=not a.no_voice)
         if not p:
             print(f"  건너뜀(사진 없음) {c['slug']}")
             continue

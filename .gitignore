@@ -10,6 +10,9 @@ notes.local.*
 
 # 의존성/캐시
 node_modules/
+__pycache__/
+Youtube/.작업/
+Youtube/목소리미리보기/
 
 # Supabase CLI 캐시
 supabase/.temp/
