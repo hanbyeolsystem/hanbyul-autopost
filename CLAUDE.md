@@ -64,6 +64,11 @@ There is no local emulator config checked in; verify against the deployed functi
 - `구글블로그.txt` and `secrets/`, `*.key`, `.env` are git-ignored — never commit credentials.
 - Commit messages are Korean Conventional Commits (`feat(blog):`, `fix(google-oauth):`).
 
+## 네이버 블로그 1단계 (2026-10-12 ~ 11-09)
+- 콘솔 왼쪽 맨 위 "네이버 블로그 1단계" 상자: `콘솔/naver-topics.js`(5분야 x 8주제, 1단계 추천 12편)에서 고르고 "칸 채우기" → 증상·검색어·글 유형·서비스 채움, 장비는 '기타/미정', 채널은 네이버만. 사진이 있고 분석 전이면 생성 직전에 자동 분석(사진 줄여서 전송).
+- 네이버 ⚡바로발행 때 `localStorage.hanbyul_np1_log` 에 기록(같은 제목은 한 번). 판정 기준(안): 노린 검색어로 블로그 검색에 잡히는 글 12편 중 6편 이상. 기록은 브라우저별이라 판정 때 블로그 RSS 로 맞춘다.
+- 업종 특화 블로그 원고 서비스(가칭 딸깍블로그)를 팔기 전 시범이다. 서버(`index.ts`)는 군단 앱이 직접 읽으니 이 일로 고치지 않았다.
+
 ## 사람글 규칙 (2026-09-12)
 - 6채널 전부 `클로드코드공부/글쓰기규칙/사람글_규칙.md` 를 따른다. 코드 반영 위치: `HUMAN_VOICE` 12)~15), `HUMANIZE_RULES` 끝 두 줄, `CHANNEL_AGENTS.google` 제목 규칙(대시·"함께 해결한 이야기" 꼬리 금지).
 - 생성 결과를 점검하려면 글을 .md 로 저장하고 `python ../글쓰기규칙/ai_tell_check.py <파일>` 로 밀도를 본다(8 이하 합격).
