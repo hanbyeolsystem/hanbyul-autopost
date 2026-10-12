@@ -97,14 +97,7 @@
     border:1px solid var(--line);color:var(--sub);cursor:pointer}
   .tabbar .tb.on{background:var(--accent);color:#fff;border-color:var(--accent)}
   .note{background:#10233a;border:1px solid #1e3a5f;color:#9cc4ef;padding:10px 12px;
-    border-radius:10px;font-size:12px;margin-top:14px}
-  .np1{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--naver);
-    border-radius:10px;padding:12px;margin-bottom:6px}
-  .np1-head{display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:14px}
-  .np1-head .badge{margin-left:auto}
-  .np1-info{font-size:12px;color:var(--sub);margin-top:8px;line-height:1.6}
-  .np1-info b{color:var(--ink);font-weight:600}
-  /* ── 휴대폰(≤680px) ── PC와 같은 기능을 손가락으로 쓸 수 있게 */
+    border-radius:10px;font-size:12px;margin-top:14px}  /* ── 휴대폰(≤680px) ── PC와 같은 기능을 손가락으로 쓸 수 있게 */
   @media(max-width:680px){
     header{padding:12px 14px;flex-wrap:wrap;gap:10px}
     header h1{font-size:15px}
@@ -151,15 +144,6 @@
 <div class="wrap">
   <section class="left">
     <h2>1. 소재 입력</h2>
-
-    <!-- 네이버 블로그 1단계(2026-10-12~11-09, 12편): 주제 은행(naver-topics.js)에서 고르고 사진 + 한 일 한 줄 → 네이버 원고 → 반자동 발행 -->
-    <div id="np1" class="np1">
-      <div class="np1-head"><b>네이버 블로그 1단계</b><span class="badge" id="np1Count">0/12</span></div>
-      <select id="np1Topic" aria-label="주제 고르기"></select>
-      <div id="np1Info" class="np1-info"></div>
-      <button class="mini pub" id="np1Apply" style="width:100%;margin-top:8px">이 주제로 칸 채우기 (네이버만)</button>
-      <details style="margin-top:8px;font-size:12px"><summary style="cursor:pointer;color:var(--sub)">올린 글 기록</summary><div id="np1Log"></div></details>
-    </div>
 
     <label>미디어 (사진/영상)</label>
     <div class="drop" id="drop">📷 클릭하거나 파일을 끌어다 놓으세요<br><span style="font-size:11px">jpg · png · heic · mp4 등 (아이폰 HEIC 사진은 JPG로 자동 변환)</span></div>
@@ -372,7 +356,6 @@
   </div>
 </div>
 
-<script src="naver-topics.js"></script>
 <script>
 const CHANNELS = [
   {id:'naver',    name:'네이버 블로그', color:'var(--naver)',    limit:2000, mode:'반자동(예약)'},
@@ -430,59 +413,6 @@ CHANNELS.forEach(c=>{
     <span class="dot" style="background:${c.color}"></span>${c.name}`;
   chWrap.appendChild(el);
 });
-
-// ── 네이버 블로그 1단계: 주제 고르기 → 칸 채우기 → 반자동 발행 때 기록 ──
-// ponytail: 기록은 이 브라우저 localStorage 에만 남는다. 판정(11-09) 때는 블로그 RSS 로 다시 맞춰 본다.
-const NP1 = window.NAVER_TOPICS || { cats:[], topics:[], phase1:[] };
-const NP1_GOAL = 12;
-const NP1_SVC = { pc:'컴퓨터 구축/유지보수', inkjet:'프린터 렌탈/판매', mfp:'복합기/복사기 렌탈', laser:'프린터 렌탈/판매', nas:'시놀로지 NAS 구축' };
-let np1Current = null;   // 칸을 채운 주제. 발행 기록에 붙는다.
-function np1Log(){ try{ const v=JSON.parse(localStorage.getItem('hanbyul_np1_log')); return Array.isArray(v)?v:[]; }catch(e){ return []; } }
-function np1Search(kw){ return 'https://search.naver.com/search.naver?ssc=tab.blog.all&query='+encodeURIComponent(kw); }
-function np1Info(){
-  const t = NP1.topics.find(x=>x.id===document.getElementById('np1Topic').value);
-  document.getElementById('np1Info').innerHTML = t
-    ? `<b>첫 줄 문제</b> ${escapeHtml(t.problem)}<br><b>노린 검색어</b> ${escapeHtml(t.kw)}<br><b>찍을 사진</b> ${escapeHtml(t.photos)}` : '';
-}
-function np1Render(){
-  const log = np1Log(), done = new Set(log.map(x=>x.id));
-  document.getElementById('np1Count').textContent = `${log.length}/${NP1_GOAL}`;
-  const sel = document.getElementById('np1Topic'), cur = sel.value;
-  const label = t=>{ const n=NP1.phase1.indexOf(t.id); return (done.has(t.id)?'✓ ':'')+(n>=0?`[추천 ${n+1}] `:'')+t.title; };
-  sel.innerHTML = NP1.cats.map(c=>`<optgroup label="${c.name}">`+
-    NP1.topics.filter(t=>t.cat===c.id).map(t=>`<option value="${t.id}">${escapeHtml(label(t))}</option>`).join('')+'</optgroup>').join('');
-  sel.value = cur || NP1.phase1.find(id=>!done.has(id)) || ((NP1.topics[0]||{}).id || '');
-  np1Info();
-  document.getElementById('np1Log').innerHTML = log.length
-    ? log.slice().reverse().map(x=>`<div style="padding:6px 0;border-bottom:1px solid var(--line)">${escapeHtml(x.date)} · ${escapeHtml(x.title)}<br>
-        <span style="color:var(--sub)">검색어 ${escapeHtml(x.kw||'-')}</span>${x.kw?` <a href="${np1Search(x.kw)}" target="_blank" rel="noopener" style="color:var(--accent)">블로그 검색 확인 ↗</a>`:''}</div>`).join('')
-    : '<div style="color:var(--sub);padding:6px 0">아직 없습니다. 네이버 카드의 ⚡ 바로발행을 누르면 여기에 쌓입니다.</div>';
-}
-function np1Record(text){
-  const log = np1Log(), title = splitTitleAndBody(text).title;
-  if(log.some(x=>x.title===title)) return;   // 같은 글을 두 번 눌러도 한 번만
-  log.push({ id: np1Current ? np1Current.id : '', kw: document.getElementById('kw').value.trim(), title,
-             date: new Date().toLocaleDateString('sv-SE') });
-  try{ localStorage.setItem('hanbyul_np1_log', JSON.stringify(log)); }catch(e){}
-  np1Render();
-}
-document.getElementById('np1Topic').onchange = np1Info;
-document.getElementById('np1Apply').onclick = ()=>{
-  const t = NP1.topics.find(x=>x.id===document.getElementById('np1Topic').value); if(!t) return;
-  np1Current = t;
-  document.getElementById('pain').value = t.problem;
-  document.getElementById('kw').value = t.kw;
-  document.getElementById('posttype').value = t.type || 'guide';
-  syncAdBox();
-  const setOpt = (id, v)=>{ const el=document.getElementById(id); if([...el.options].some(o=>o.value===v)) el.value=v; };
-  setOpt('service', NP1_SVC[t.cat]);
-  setOpt('model', '기타/미정');   // 기본값(첫 항목)이 사진에 없는 장비를 글에 넣지 않게
-  document.querySelectorAll('#channels input').forEach(i=>{ i.checked = i.value==='naver'; });
-  const seed = document.getElementById('seed');
-  seed.placeholder = '현장에서 한 일 한 줄. 예) 수성구 세무사무실, 교세라 복합기 급지 롤러 교체';
-  seed.focus();
-};
-np1Render();
 
 // ── AI 백엔드 주소 자동 기억 (한 번만 입력하면 다음부터 자동) ──
 const apiBaseEl = document.getElementById('apiBase');
@@ -2048,7 +1978,6 @@ async function publishNow(ch, text){
     }
     addToBoard(ch.id, makePost(ch, text, '발행', { url: 'https://blog.naver.com/' }));
     saveHistory(ch.id, text);
-    np1Record(text);
     alert(
       `✅ 네이버 블로그 발행 준비 완료\n\n` +
       `📋 글은 클립보드에 복사됨 → 네이버 글쓰기 창에 Ctrl+V${zipMsg}\n\n` +
